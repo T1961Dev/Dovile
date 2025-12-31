@@ -34,23 +34,17 @@ export function Timeline({ selectedDate, timezone, mode }: TimelineProps) {
       setSelectedDate(date);
       setLoading(true);
       try {
-        const response = await fetch(`/api/timeline?date=${date}&mode=${mode}&tz=${timezone}`, {
-          method: "GET",
-          credentials: "include",
-        });
-        if (!response.ok) {
-          throw new Error("Failed to load timeline data");
-        }
-        const payload = await response.json();
+        const { getTimelineData } = await import("@/actions/timeline");
+        const payload = await getTimelineData(date, mode, "daily", timezone);
         hydrate({
           date,
           areas: payload.areas,
           workstreams: payload.workstreams,
           tasks: payload.todayTasks,
           ideas: payload.ideas,
-          events: payload.events,
+          events: payload.events ?? [],
         });
-        setEvents(payload.events);
+        setEvents(payload.events ?? []);
       } catch (error) {
         console.error(error);
       } finally {

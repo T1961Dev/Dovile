@@ -84,15 +84,19 @@ export function WheelOfLifeOverlay() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="grid max-w-4xl grid-cols-1 gap-8 rounded-3xl border border-slate-100 bg-white p-10 shadow-2xl md:grid-cols-2">
-        <DialogHeader className="text-left">
-          <DialogTitle className="text-2xl font-semibold text-slate-900">
-            Wheel of Life
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-6 overflow-y-auto pr-1">
+      <DialogContent className="grid max-w-4xl grid-cols-1 gap-8 rounded-3xl border border-slate-100 bg-white p-10 shadow-2xl md:grid-cols-2 max-h-[90vh] overflow-hidden">
+        <div className="flex flex-col gap-6 md:col-span-1">
+          <DialogHeader className="text-left">
+            <DialogTitle className="text-2xl font-semibold text-slate-900">
+              Wheel of Life
+            </DialogTitle>
+            <p className="text-sm text-slate-600 mt-2">
+              Rate your current feeling of satisfaction in each life area. Ask yourself: How do I feel in this life area today? No further questioning, just complete honesty. Save today's ratings by clicking the button at the bottom. You may repeat this coaching exercise monthly, quarterly, yearly or so.
+            </p>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 overflow-y-auto pr-1 max-h-[calc(90vh-200px)]">
           {data.map((area) => (
-            <div key={area.id} className="space-y-3 rounded-2xl border border-slate-100 bg-white/80 p-4 shadow-sm">
+            <div key={area.id} className="space-y-2 rounded-2xl border border-slate-100 bg-white/80 p-3 shadow-sm min-w-0">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-sm font-semibold text-slate-800">{area.name}</span>
@@ -114,18 +118,21 @@ export function WheelOfLifeOverlay() {
               <RatingSparkline history={history[area.id] ?? []} pending={pendingRatings[area.id]} />
             </div>
           ))}
+          {loadingHistory ? (
+            <p className="text-center text-xs text-slate-400 col-span-2">Loading history…</p>
+          ) : null}
+        </div>
           <Button
             onClick={handleSave}
             disabled={submitting}
-            className="mt-2 w-full rounded-full bg-[#0EA8A8] text-white hover:bg-[#0C8F90]"
+            className="w-full rounded-full bg-[#0EA8A8] text-white hover:bg-[#0C8F90] col-span-2"
           >
             {submitting ? "Saving…" : "Save ratings"}
           </Button>
-          {loadingHistory ? (
-            <p className="text-center text-xs text-slate-400">Loading history…</p>
-          ) : null}
         </div>
-        <RadarChart areas={areas} pendingRatings={pendingRatings} />
+        <div className="md:col-span-1">
+          <RadarChart areas={areas} pendingRatings={pendingRatings} />
+        </div>
       </DialogContent>
     </Dialog>
   );

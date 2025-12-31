@@ -73,9 +73,39 @@ export async function classifyCaptureAction(rawInput: unknown): Promise<Classify
     .eq("user_id", userId)
     .maybeSingle();
 
+  // Fetch workstreams with descriptions for AI context
+  const { data: workstreamsData } = await (supabase
+    .from("workstreams")
+    .select("id, title, description, life_area_id") as any)
+    .eq("user_id", userId)
+    .eq("active", true);
+
+  // Get recent task examples for each workstream to help AI learn
+  const workstreamsWithContext = await Promise.all(
+    (workstreamsData ?? []).map(async (ws: { id: string; title: string; description: string | null; life_area_id: string }) => {
+      const { data: recentTasks } = await (supabase
+        .from("items")
+        .select("title") as any)
+        .eq("user_id", userId)
+        .eq("workstream_id", ws.id)
+        .eq("type", "task")
+        .order("created_at", { ascending: false })
+        .limit(5);
+
+      const area = areas.find((a: LifeAreaRow) => a.id === ws.life_area_id);
+      return {
+        title: ws.title,
+        description: ws.description,
+        lifeArea: area?.name ?? "Unknown",
+        taskExamples: (recentTasks ?? []).map((t: { title: string }) => t.title),
+      };
+    })
+  );
+
   const classification = await classifyUtterance(parsed.data.text, {
     model: coachConfig.data?.model ?? undefined,
     dailyCapacity: parsed.data.dailyCapacity ?? DEFAULT_DAILY_CAPACITY,
+    workstreams: workstreamsWithContext,
   });
 
   const targetArea =

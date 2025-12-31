@@ -1,5 +1,5 @@
+import "server-only";
 import { cache } from "react";
-import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 
 import {
@@ -15,7 +15,9 @@ export const createServerSupabaseClient = cache(async () => {
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error("Supabase environment variables are not set");
   }
-  const cookieStore = await cookies();
+  // Use dynamic import to avoid bundling issues with next/headers
+  const { cookies: getCookies } = await import("next/headers");
+  const cookieStore = await getCookies();
 
   return createServerClient<Database>(supabaseUrl, supabaseAnonKey, {
     cookies: {

@@ -9,7 +9,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { createWorkstreamAction, updateWorkstreamAction } from "@/actions/workstreams";
-import { createItemAction, updateItemAction, startTaskAction, completeItemAction, getItemAction } from "@/actions/items";
+import { createItemAction, updateItemAction, startTaskAction, completeItemAction, getItemAction, archiveIdeaAction, restoreIdeaAction, getArchivedIdeasAction } from "@/actions/items";
+import { updateLifeAreaAction, deleteLifeAreaAction } from "@/actions/life-areas";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import type { Item, Workstream } from "@/types/entities";
 import { useBubbleStore, RING_CONFIG, type Bubble } from "@/store/bubbles";
@@ -23,7 +24,7 @@ const polarToNormalized = (radius: number, angle: number) => ({
   y: (Math.sin(angle) * radius + CANVAS_SIZE / 2) / CANVAS_SIZE,
 });
 
-type TabKey = "projects" | "processes" | "habits" | "items";
+type TabKey = "projects" | "processes" | "items" | "archive";
 
 export function AreaSheet() {
   const openAreaId = useDashboardStore((state) => state.areaSheetOpen);
@@ -36,8 +37,10 @@ export function AreaSheet() {
   const tasks = useDashboardStore((state) => state.tasks);
   const ideas = useDashboardStore((state) => state.ideas);
   const setWorkstreams = useDashboardStore((state) => state.setWorkstreams);
+  const setAreas = useDashboardStore((state) => state.setAreas);
   const upsertItem = useDashboardStore((state) => state.upsertItem);
   const upsertBubble = useBubbleStore((state) => state.upsertBubble);
+  const removeBubble = useBubbleStore((state) => state.removeBubble);
   const updateBubblePosition = useBubbleStore((state) => state.updateBubblePosition);
   const getNextAngle = useBubbleStore((state) => state.getNextAngle);
 
@@ -106,6 +109,28 @@ export function AreaSheet() {
   const [newItemNotes, setNewItemNotes] = useState("");
   const [itemType, setItemType] = useState<"task" | "idea">("idea");
   const [submittingItem, setSubmittingItem] = useState(false);
+  const [archivedIdeas, setArchivedIdeas] = useState<Item[]>([]);
+  const [loadingArchived, setLoadingArchived] = useState(false);
+
+  // Fetch archived ideas when archive tab is active
+  useEffect(() => {
+    if (activeTab === "archive" && selectedBubbleType === "life_area" && selectedBubbleId) {
+      setLoadingArchived(true);
+      getArchivedIdeasAction(selectedBubbleId)
+        .then((items) => {
+          setArchivedIdeas(items as Item[]);
+        })
+        .catch((error) => {
+          console.error("Failed to fetch archived ideas:", error);
+          toast.error("Failed to load archived ideas");
+        })
+        .finally(() => {
+          setLoadingArchived(false);
+        });
+    } else if (activeTab !== "archive") {
+      setArchivedIdeas([]);
+    }
+  }, [activeTab, selectedBubbleType, selectedBubbleId]);
 
   const filteredWorkstreams = useMemo(() => {
     if (selectedBubbleType === "life_area" && selectedBubbleId) {
@@ -310,13 +335,72 @@ export function AreaSheet() {
         {selectedBubble ? (
           <>
             <SheetHeader className="text-left">
-              <SheetTitle className="flex items-center gap-3 text-2xl font-semibold text-[#0B1918]">
-                <span
-                  className="inline-block h-3 w-3 rounded-full"
-                  style={{ backgroundColor: displayColor }}
-                />
-                {displayTitle}
-              </SheetTitle>
+              <div className="flex items-center justify-between">
+                <SheetTitle className="flex items-center gap-3 text-2xl font-semibold text-[#0B1918]">
+                  <span
+                    className="inline-block h-3 w-3 rounded-full"
+                    style={{ backgroundColor: displayColor }}
+                  />
+                  {selectedBubbleType === "life_area" && area ? (
+                    <input
+                      type="text"
+                      defaultValue={area.name}
+                      onBlur={(e) => {
+                        const newName = e.target.value.trim();
+                        if (newName && newName !== area.name) {
+                          updateLifeAreaAction(area.id, { name: newName })
+                            .then((updated) => {
+                              setAreas(areas.map((a) => (a.id === updated.id ? updated as any : a)));
+                              upsertBubble({
+                                ...selectedBubble!,
+                                title: updated.name,
+                              });
+                              toast.success("Life area renamed");
+                            })
+                            .catch((error) => {
+                              console.error(error);
+                              toast.error("Failed to rename life area");
+                              e.target.value = area.name; // Restore on error
+                            });
+                        } else if (!newName) {
+                          e.target.value = area.name; // Restore if empty
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.currentTarget.blur();
+                        }
+                      }}
+                      className="text-2xl font-semibold border-none p-0 h-auto focus-visible:ring-0 bg-transparent outline-none"
+                    />
+                  ) : (
+                    displayTitle
+                  )}
+                </SheetTitle>
+                {selectedBubbleType === "life_area" && area && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      if (confirm(`Delete "${area.name}"? This will also delete all projects, processes, and items in this life area.`)) {
+                        try {
+                          await deleteLifeAreaAction(area.id);
+                          setAreas(areas.filter((a) => a.id !== area.id));
+                          removeBubble(area.id);
+                          toast.success("Life area deleted");
+                          closeBubbleSheet();
+                        } catch (error) {
+                          console.error(error);
+                          toast.error("Failed to delete life area");
+                        }
+                      }
+                    }}
+                    className="h-8 rounded-full border-red-400/40 px-4 text-xs font-semibold text-red-600 hover:border-red-600/70"
+                  >
+                    Delete
+                  </Button>
+                )}
+              </div>
               {selectedBubble.metadata?.description ? (
                 <p className="mt-2 text-sm text-[#195552]">
                   {String(selectedBubble.metadata.description)}
@@ -338,8 +422,8 @@ export function AreaSheet() {
                   <TabsTrigger value="processes" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-[#0B1918]">
                     Processes
                   </TabsTrigger>
-                  <TabsTrigger value="habits" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-[#0B1918]">
-                    Habits
+                  <TabsTrigger value="archive" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-[#0B1918]">
+                    Archive
                   </TabsTrigger>
                   <TabsTrigger value="items" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-[#0B1918]">
                     All Items
@@ -355,10 +439,52 @@ export function AreaSheet() {
                     workstreams={filteredWorkstreams.filter((stream) => stream.kind === "process")}
                   />
                 </TabsContent>
-                <TabsContent value="habits" className="mt-4 space-y-4">
-                  <WorkstreamList
-                    workstreams={filteredWorkstreams.filter((stream) => stream.kind === "habit")}
-                  />
+                <TabsContent value="archive" className="mt-4 space-y-4">
+                  {loadingArchived ? (
+                    <div className="py-8 text-center text-sm text-[#195552]">
+                      Loading archived ideas...
+                    </div>
+                  ) : archivedIdeas.length === 0 ? (
+                    <EmptyState message="No archived ideas yet." />
+                  ) : (
+                    <div className="space-y-3">
+                      {archivedIdeas.map((item) => (
+                        <motion.div
+                          key={item.id}
+                          className="rounded-2xl border border-[#0EA8A8]/15 bg-white p-4 shadow-sm"
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <h4 className="text-sm font-semibold text-[#0B1918]">{item.title}</h4>
+                              {item.notes && <p className="mt-1 text-xs text-slate-500">{item.notes}</p>}
+                            </div>
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={async () => {
+                                  try {
+                                    const restored = await restoreIdeaAction(item.id);
+                                    upsertItem(restored as Item);
+                                    setArchivedIdeas((prev) => prev.filter((i) => i.id !== item.id));
+                                    toast.success("Idea restored");
+                                  } catch (error) {
+                                    console.error(error);
+                                    toast.error("Couldn't restore idea");
+                                  }
+                                }}
+                                className="h-8 rounded-full border-[#0EA8A8]/40 px-4 text-xs font-semibold text-[#0EA8A8] hover:border-[#0EA8A8]/70"
+                              >
+                                Restore
+                              </Button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
                 </TabsContent>
                 <TabsContent value="items" className="mt-4 space-y-4">
                   <ItemList items={areaItems} />
@@ -506,6 +632,29 @@ export function AreaSheet() {
                       className="h-8 rounded-full border-[#FF7348]/40 px-4 text-xs font-semibold text-[#FF7348] hover:border-[#FF7348]/70"
                     >
                       Archive
+                    </Button>
+                  </div>
+                )}
+                {item.type === "idea" && item.status !== "archived" && (
+                  <div className="flex gap-2 mt-4">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        try {
+                          const archived = await archiveIdeaAction(item.id);
+                          upsertItem(archived as Item);
+                          useBubbleStore.getState().removeBubble(item.id);
+                          toast.success("Idea archived");
+                          closeBubbleSheet();
+                        } catch (error) {
+                          console.error(error);
+                          toast.error("Couldn't archive idea");
+                        }
+                      }}
+                      className="h-8 rounded-full border-[#FF7348]/40 px-4 text-xs font-semibold text-[#FF7348] hover:border-[#FF7348]/70"
+                    >
+                      Archive Idea
                     </Button>
                   </div>
                 )}
@@ -666,8 +815,8 @@ function mapTabToKind(tab: TabKey): "project" | "process" | "habit" {
       return "project";
     case "processes":
       return "process";
-    case "habits":
-      return "habit";
+    case "archive":
+      return "project"; // Not used, archive tab shows ideas
     default:
       return "project";
   }

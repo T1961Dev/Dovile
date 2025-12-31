@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 
-const PROVIDERS: Provider[] = ["google", "apple", "github"];
+// Simplified auth - email/password is primary, OAuth providers optional
+const PROVIDERS: Provider[] = ["google"]; // Google auth is available but email/password is primary
 
 export function AuthLanding() {
   const router = useRouter();

@@ -1,3 +1,4 @@
+import "server-only";
 import { cache } from "react";
 
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -51,11 +52,24 @@ export async function getSettings(client?: TypedSupabaseClient) {
 
 export async function getTodayTasks(dateIso: string, client?: TypedSupabaseClient) {
   const supabase = client ?? (await getServerSupabaseClient());
+  const today = new Date().toISOString().slice(0, 10);
+  const isPastDate = dateIso < today;
+  const isToday = dateIso === today;
+  const isFutureDate = dateIso > today;
+  
+  // For past dates: include done tasks
+  // For today: include pending and in_progress
+  // For future dates: include pending and in_progress
+  const statusFilter = isPastDate 
+    ? ["pending", "in_progress", "done"]
+    : ["pending", "in_progress"];
+  
   const { data, error } = await supabase
     .from("items")
     .select("*")
     .eq("type", "task")
-    .in("status", ["pending", "in_progress"])
+    .in("status", statusFilter)
+    .neq("status", "archived")
     .or(`scheduled_for.eq.${dateIso},and(scheduled_for.is.null,due_date.eq.${dateIso})`)
     .order("created_at", { ascending: true });
 
@@ -97,6 +111,28 @@ export async function getIdeas(client?: TypedSupabaseClient) {
   }
 
   return data;
+}
+
+export async function getArchivedIdeas(lifeAreaId?: string, client?: TypedSupabaseClient) {
+  const supabase = client ?? (await getServerSupabaseClient());
+  let query = supabase
+    .from("items")
+    .select("*")
+    .eq("type", "idea")
+    .eq("status", "archived")
+    .order("created_at", { ascending: false });
+  
+  if (lifeAreaId) {
+    query = query.eq("life_area_id", lifeAreaId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw error;
+  }
+
+  return data ?? [];
 }
 
 export async function getResourceBlocks(client?: TypedSupabaseClient) {

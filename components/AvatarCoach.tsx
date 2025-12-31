@@ -164,7 +164,7 @@ export function AvatarCoach({
           <motion.button
             key="coach-floating"
             onClick={() => setOpen(true)}
-            className="fixed bottom-8 left-6 z-30 flex h-16 w-16 items-center justify-center rounded-full bg-[#0EA8A8] text-2xl text-white shadow-[0_16px_32px_-18px_rgba(14,168,168,0.5)]"
+            className="fixed bottom-20 left-6 z-50 flex h-16 w-16 items-center justify-center rounded-full bg-[#0EA8A8] text-2xl text-white shadow-[0_16px_32px_-18px_rgba(14,168,168,0.5)]"
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.8, opacity: 0 }}
@@ -182,7 +182,7 @@ export function AvatarCoach({
               <div className="space-y-1">
                 <DialogTitle className="text-lg font-semibold text-[#0B1918]">Coach</DialogTitle>
                 <DialogDescription className="text-xs text-[#195552]">
-                  Whisper your ideas. I’ll place them.
+                  Type in or make a voice memo of any small idea or task you have and I'll place it directly into correct life area and it's project for you.
                 </DialogDescription>
             </div>
             <Button
@@ -196,18 +196,6 @@ export function AvatarCoach({
               {recording ? "Stop" : "Voice"}
             </Button>
             </DialogHeader>
-
-          <div className="flex flex-wrap gap-2">
-            {suggestions.map((suggestion) => (
-              <button
-                key={suggestion}
-                onClick={() => handleSubmit(suggestion)}
-                  className="rounded-full border border-[#0EA8A8]/20 bg-white px-4 py-2 text-xs font-medium text-[#0EA8A8] transition hover:border-[#0EA8A8]/40 hover:bg-[#D6FFF3]/40"
-              >
-                {suggestion}
-              </button>
-            ))}
-            </div>
           </div>
 
           <div className="flex-1 space-y-4 overflow-y-auto border-t border-[#0EA8A8]/10 bg-[#F6FFFC] p-6">

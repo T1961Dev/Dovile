@@ -11,7 +11,12 @@ const provider: Provider | null = openaiKey ? "openai" : openRouterKey ? "openro
 
 export async function classifyUtterance(
   message: string,
-  options?: { model?: string; dailyCapacity?: number; availableHours?: number },
+  options?: { 
+    model?: string; 
+    dailyCapacity?: number; 
+    availableHours?: number;
+    workstreams?: Array<{ title: string; description: string | null; lifeArea: string; taskExamples?: string[] }>;
+  },
 ) {
   const model = options?.model ?? defaultModel();
   const dailyCapacity = options?.dailyCapacity ?? DEFAULT_DAILY_CAPACITY;
@@ -21,6 +26,23 @@ export async function classifyUtterance(
     ? `The user has ${availableHours} hours available today after accounting for calendar events and routine blocks (sleep, food, etc.). Only suggest tasks that can realistically fit in this time.`
     : `The user's daily capacity is ${dailyCapacity} tasks.`;
 
+  // Build workstream context for learning
+  let workstreamContext = "";
+  if (options?.workstreams && options.workstreams.length > 0) {
+    workstreamContext = `\n\nEXISTING PROJECTS/PROCESSES FOR CONTEXT (learn from these to better categorize new items):\n`;
+    options.workstreams.forEach((ws) => {
+      workstreamContext += `- "${ws.title}" (${ws.lifeArea})`;
+      if (ws.description) {
+        workstreamContext += ` - Description: ${ws.description}`;
+      }
+      if (ws.taskExamples && ws.taskExamples.length > 0) {
+        workstreamContext += ` - Example tasks: ${ws.taskExamples.slice(0, 3).join(", ")}`;
+      }
+      workstreamContext += `\n`;
+    });
+    workstreamContext += `\nUse these projects/processes as reference. If the new item relates to any of these, suggest the project/process name in "workstream_hint".`;
+  }
+
   const systemPrompt = `
 You are LifeWheel's productivity coach helping users organize their thoughts in DUMP MODE.
 
@@ -29,11 +51,12 @@ Your job is to classify the user's message and automatically assign it to the co
 CRITICAL RULES FOR DUMP MODE:
 1. All dumped items should become IDEAS (not tasks) initially - the user will later convert them to tasks or actions as needed.
 2. Automatically assign the item to the most appropriate life area from: ${JSON.stringify(DEFAULT_LIFE_AREAS)}
-3. If you can identify a specific project or process this item belongs to, suggest it in "workstream_hint". If you cannot decide, leave it null - the item will stay in the outer circle of the life area.
+3. IMPORTANT: If you can identify a specific project or process this item belongs to (by matching it to existing projects/processes below or by understanding the context), suggest the EXACT project/process name in "workstream_hint". Learn from project descriptions and example tasks to make better matches. If you cannot decide, leave it null - the item will stay in the outer circle of the life area.
 4. If the user's wording is unclear, suggest better wording in "improved_wording" and include it in the response.
 5. If you're uncertain about the life area, set "confidence" below 0.7 and suggest the user clarify in "actions".
 
 ${capacityContext}
+${workstreamContext}
 
 Return JSON with:
 - "type": "idea" (always "idea" for DUMP MODE)

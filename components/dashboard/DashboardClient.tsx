@@ -13,7 +13,7 @@ import { CapacityHUD } from "@/components/CapacityHUD";
 import { GamificationHUD } from "@/components/GamificationHUD";
 import { OnboardingGuide } from "@/components/OnboardingGuide";
 import { PaywallDialog } from "@/components/PaywallDialog";
-import { TimelineView } from "@/components/TimelineView";
+import { DayByDayTimeline } from "@/components/DayByDayTimeline";
 import { WheelOfLifeOverlay } from "@/components/WheelOfLifeOverlay";
 import { EmptyHeadPanel } from "@/components/dashboard/EmptyHeadPanel";
 import { PlannerOverlay } from "@/components/dashboard/PlannerOverlay";
@@ -65,6 +65,17 @@ function CanvasPanWrapper({ children }: { children: React.ReactNode }) {
       }, 500);
     }
   };
+
+  // Listen for center-view events
+  useEffect(() => {
+    const handleCenterView = () => {
+      resetView();
+    };
+    window.addEventListener('center-view', handleCenterView);
+    return () => {
+      window.removeEventListener('center-view', handleCenterView);
+    };
+  }, []);
 
   const handleMouseDown = (e: React.MouseEvent) => {
     // Only start panning if clicking on non-interactive elements
@@ -139,9 +150,14 @@ function CanvasPanWrapper({ children }: { children: React.ReactNode }) {
 
   // Cleanup global listeners on unmount
   useEffect(() => {
+    const handleCenterView = () => {
+      resetView();
+    };
+    window.addEventListener('center-view', handleCenterView);
     return () => {
       document.removeEventListener('mousemove', handleGlobalMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('center-view', handleCenterView);
     };
   }, [handleGlobalMouseMove, handleMouseUp]);
 
@@ -163,33 +179,30 @@ function CanvasPanWrapper({ children }: { children: React.ReactNode }) {
       >
         {children}
       </div>
-      {/* Reset View Button */}
-      {(panPosition.x !== 0 || panPosition.y !== 0) && (
-        <button
-          onClick={resetView}
-          className="fixed bottom-8 right-8 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-lg border border-[#0EA8A8]/30 hover:bg-[#0EA8A8]/10 transition-colors"
-          title="Reset view to center"
-          aria-label="Reset view"
+      {/* Reset View Button - Fixed in lower right corner */}
+      <button
+        onClick={resetView}
+        className="fixed bottom-8 right-8 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-lg border border-[#0EA8A8]/30 hover:bg-[#0EA8A8]/10 transition-colors"
+        title="Center view"
+        aria-label="Center view"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="text-[#0EA8A8]"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="text-[#0EA8A8]"
-          >
-            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
-            <path d="M21 3v5h-5" />
-            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
-            <path d="M3 21v-5h5" />
-          </svg>
-        </button>
-      )}
+          <circle cx="12" cy="12" r="10" />
+          <circle cx="12" cy="12" r="6" />
+          <circle cx="12" cy="12" r="2" />
+        </svg>
+      </button>
     </>
   );
 }
@@ -272,7 +285,14 @@ export function DashboardClient({
     syncUserContext(user.id);
   }, [syncUserContext, user.id]);
 
+  const initialDateRef = useRef<string | null>(null);
+
   useEffect(() => {
+    // Store the initial date
+    if (initialDateRef.current === null) {
+      initialDateRef.current = date;
+    }
+    
     hydrate({
       date,
       areas: data.areas,
@@ -289,6 +309,48 @@ export function DashboardClient({
     });
     setHydrated(true);
   }, [hydrate, date, data, events, hydrateBubbles]);
+
+  // Handle date changes from timeline
+  useEffect(() => {
+    if (!hydrated || !selectedDate) return;
+    
+    // Skip if this is the initial date (already loaded)
+    if (initialDateRef.current !== null && selectedDate === initialDateRef.current) {
+      return;
+    }
+    
+    // Fetch data for the selected date
+    const loadTimelineData = async () => {
+      try {
+        console.log("[DashboardClient] Loading timeline data for date:", selectedDate, "Initial date:", initialDateRef.current);
+        // Use dynamic import to ensure server action is loaded correctly
+        const { getTimelineData } = await import("@/actions/timeline");
+        const payload = await getTimelineData(selectedDate, "day", "full", timezone);
+        
+        console.log("[DashboardClient] Success, payload keys:", Object.keys(payload), "Tasks:", payload.todayTasks?.length, "Ideas:", payload.ideas?.length);
+        hydrate({
+          date: selectedDate,
+          areas: payload.areas ?? [],
+          workstreams: payload.workstreams ?? [],
+          tasks: payload.todayTasks ?? [],
+          ideas: payload.ideas ?? [],
+          events: payload.events ?? [],
+        });
+        // Combine allTasks and ideas for full scope on outer edge
+        const wheelItems = [...(payload.allTasks ?? []), ...(payload.ideas ?? [])];
+        hydrateBubbles({
+          lifeAreas: payload.areas ?? [],
+          workstreams: payload.workstreams ?? [],
+          items: wheelItems,
+        });
+      } catch (error) {
+        console.error("[DashboardClient] Error loading timeline:", error);
+        toast.error(`Failed to load timeline: ${error instanceof Error ? error.message : "Unknown error"}`);
+      }
+    };
+    
+    loadTimelineData();
+  }, [selectedDate, timezone, hydrated, hydrate, hydrateBubbles]);
 
   const mapRowToItem = (row: ItemRow): Item =>
     ({
@@ -819,37 +881,26 @@ export function DashboardClient({
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-[#FBF9F4] text-[#0B1918]" style={{ overflow: 'visible' }}>
-      <header className="px-6 pb-8 pt-10 sm:px-10 relative z-50">
+    <div className="relative flex min-h-screen flex-col bg-[#FBF9F4] text-[#0B1918]" style={{ overflow: 'visible', touchAction: 'manipulation' }}>
+      <header className="px-4 pb-6 pt-6 sm:px-6 md:px-10 md:pb-8 md:pt-10 relative z-50">
         <motion.div
           className="flex flex-col gap-8"
           initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
         >
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(240px,0.9fr)_minmax(0,1fr)] xl:grid-cols-[minmax(0,1fr)_280px_minmax(0,1fr)] items-start">
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)_minmax(280px,1fr)] xl:grid-cols-[minmax(0,1fr)_320px_minmax(300px,1fr)] items-start">
             <div className="space-y-4">
-              <div className="flex items-start justify-between">
-                <div className="space-y-1.5">
-                  <motion.h1
-                    initial={{ opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.1, duration: 0.4 }}
-                    className="text-3xl font-semibold tracking-tight text-[#0B1918] sm:text-[2.5rem]"
-                  >
-                    Life Scope
-                  </motion.h1>
-                  <p className="text-sm text-[#195552]">Plan your entire life beautifully.</p>
-                </div>
-                <Button
-                  variant="ghost"
-                  onClick={handleLogout}
-                  className="h-9 rounded-full px-3 text-xs font-semibold text-[#195552] hover:text-[#0B1918] hover:bg-[#0EA8A8]/10"
-                  title="Log out"
+              <div className="space-y-1.5">
+                <motion.h1
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1, duration: 0.4 }}
+                  className="text-3xl font-semibold tracking-tight text-[#0B1918] sm:text-[2.5rem]"
                 >
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Logout
-                </Button>
+                  Life Scope
+                </motion.h1>
+                <p className="text-sm text-[#195552]">Plan your entire life beautifully.</p>
               </div>
               <div className="flex flex-col gap-3">
                 <div className="flex h-11 w-full max-w-xl items-center gap-3 rounded-full border border-[#0EA8A8]/25 bg-white px-4 shadow-[0_10px_24px_-20px_rgba(15,75,68,0.35)]">
@@ -882,26 +933,6 @@ export function DashboardClient({
                   >
                     PLANNER MODE
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      const setCurrentScopeOpen = useDashboardStore.getState().setCurrentScopeOpen;
-                      setCurrentScopeOpen(true);
-                    }}
-                    className="h-9 rounded-full border-[#8F8CF5]/50 bg-[#DED6FF]/30 px-4 text-xs font-semibold text-[#8F8CF5] hover:border-[#8F8CF5]/70"
-                  >
-                    Current Scope
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      const setVisualizationMatrixOpen = useDashboardStore.getState().setVisualizationMatrixOpen;
-                      setVisualizationMatrixOpen(true);
-                    }}
-                    className="h-9 rounded-full border-[#28B7A3]/50 bg-[#7FE5D1]/30 px-4 text-xs font-semibold text-[#28B7A3] hover:border-[#28B7A3]/70"
-                  >
-                    Vision Matrix
-                  </Button>
                 </div>
               </div>
             </div>
@@ -914,11 +945,22 @@ export function DashboardClient({
                 onClick={() => setWheelOverlayOpen(true)}
                 className="h-9 rounded-full border-[#0EA8A8]/40 px-5 text-xs font-semibold text-[#0EA8A8] hover:border-[#0EA8A8]/70"
               >
-                View Wheel
+                View Wheel of Life
               </Button>
             </div>
 
             <div className="flex flex-col items-end gap-3 relative z-50">
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  onClick={handleLogout}
+                  className="h-9 rounded-full px-3 text-xs font-semibold text-[#195552] hover:text-[#0B1918] hover:bg-[#0EA8A8]/10"
+                  title="Log out"
+                >
+                  <LogOut className="h-4 w-4 mr-1.5" />
+                  Logout
+                </Button>
+              </div>
               <CapacityHUD
                 scheduledCount={tasks.length}
                 capacity={dailyCapacity}
@@ -926,62 +968,52 @@ export function DashboardClient({
                 selectedDate={selectedDate || date}
                 variant="compact"
               />
-              <div className="flex items-center gap-2">
-                <Button
-                  onClick={() => setCoachOpen(true)}
-                  className="h-9 rounded-full bg-[#FFD833] px-4 text-xs font-semibold text-[#0B1918] shadow-sm transition hover:bg-[#FFC300]"
-                >
-                  Add
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setCoachOpen(true)}
-                  className="h-9 rounded-full border-[#DED6FF]/60 bg-white px-4 text-xs font-semibold text-[#5C4FD0] hover:border-[#C5B8FF]"
-                >
-                  Open Coach
-                </Button>
-              </div>
             </div>
           </div>
         </motion.div>
       </header>
 
-      <main className="relative flex-1 pb-24" style={{ position: 'relative', overflow: 'visible', width: '100%', height: '100%' }}>
+      <main className="relative flex-1" style={{ position: 'relative', overflow: 'visible', width: '100%', height: '100%', touchAction: 'manipulation', paddingBottom: '140px' }}>
         <CanvasPanWrapper>
-          <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-8 px-4 sm:px-6" style={{ position: 'relative', minHeight: '100vh', width: '100%' }}>
+          <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-8 px-2 sm:px-4 md:px-6" style={{ position: 'relative', minHeight: '100vh', width: '100%' }}>
             <motion.section
-              className="relative flex flex-1 items-center justify-center"
+              className="relative flex flex-1 items-center justify-center w-full overflow-auto"
               initial={{ opacity: 0 }}
               animate={{ opacity: hydrated ? 1 : 0 }}
+              style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
             >
-              <CircleCanvas
-                onSelectBubble={handleSelectBubble}
-                onBubbleDrop={handleBubbleDrop}
-              />
-              {hydrated ? (
-                <AvatarCoach
-                  userId={user.id}
-                  timezone={timezone}
-                  dailyCapacity={dailyCapacity}
-                  tasksScheduled={tasks.length}
+              <div className="w-full h-full flex items-center justify-center p-4">
+                <CircleCanvas
+                  onSelectBubble={handleSelectBubble}
+                  onBubbleDrop={handleBubbleDrop}
                 />
-              ) : null}
+              </div>
             </motion.section>
 
           </div>
         </CanvasPanWrapper>
         
-        {/* Timeline locked to bottom center - like inventory bar */}
-        <div className="fixed bottom-0 left-1/2 transform -translate-x-1/2 w-full max-w-5xl z-50 pointer-events-none">
+        {/* Day-by-day timeline locked to bottom */}
+        <div className="fixed bottom-0 left-0 right-0 z-40 pointer-events-none">
           <div className="pointer-events-auto">
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: hydrated ? 1 : 0, y: hydrated ? 0 : 12 }}
             >
-              <TimelineView timezone={timezone} />
+              <DayByDayTimeline timezone={timezone} />
             </motion.div>
           </div>
         </div>
+
+        {/* Avatar Coach button - fixed bottom left */}
+        {hydrated ? (
+          <AvatarCoach
+            userId={user.id}
+            timezone={timezone}
+            dailyCapacity={dailyCapacity}
+            tasksScheduled={tasks.length}
+          />
+        ) : null}
       </main>
 
       <WheelOfLifeOverlay />

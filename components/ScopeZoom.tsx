@@ -11,25 +11,17 @@ type ScopeZoomProps = {
 };
 
 export function ScopeZoom({ currentZoom, onZoomChange }: ScopeZoomProps) {
+  // Only show "Today" button - full scope is always visible from today onwards
   return (
-    <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+    <div className="flex items-center gap-2 rounded-full border border-[#0EA8A8]/20 bg-white/80 p-1 shadow-sm">
       <Button
-        variant={currentZoom === "daily" ? "default" : "ghost"}
+        variant="default"
         size="sm"
         onClick={() => onZoomChange("daily")}
-        className="h-8 rounded-full px-3 text-xs"
+        className="h-8 rounded-full px-4 text-xs bg-[#0EA8A8] hover:bg-[#0C8F90] text-white"
       >
         <ZoomIn className="h-3 w-3 mr-1" />
-        Daily
-      </Button>
-      <Button
-        variant={currentZoom === "full" ? "default" : "ghost"}
-        size="sm"
-        onClick={() => onZoomChange("full")}
-        className="h-8 rounded-full px-3 text-xs"
-      >
-        <Maximize2 className="h-3 w-3 mr-1" />
-        Full Scope
+        Today
       </Button>
     </div>
   );

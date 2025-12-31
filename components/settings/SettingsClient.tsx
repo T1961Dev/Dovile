@@ -164,6 +164,9 @@ export function SettingsClient({
       <Card className="rounded-3xl border border-slate-100 shadow-sm">
         <CardHeader>
           <CardTitle className="text-lg">Daily Capacity</CardTitle>
+          <p className="text-xs text-slate-500 mt-1">
+            Your daily capacity: {capacity} task{capacity !== 1 ? 's' : ''} per day
+          </p>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
@@ -180,6 +183,32 @@ export function SettingsClient({
                 onChange={(event) => setCapacity(Number(event.target.value))}
                 className="mt-2 rounded-full"
               />
+            </div>
+            <div>
+              <label className="text-xs uppercase text-slate-400 mb-2 block">
+                24-Hour Capacity Blocks
+              </label>
+              <div className="grid grid-cols-12 gap-1 p-2 rounded-lg bg-slate-50">
+                {Array.from({ length: 24 }, (_, i) => {
+                  const isActive = i < capacity;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setCapacity(i + 1)}
+                      className={`h-8 rounded transition-all ${
+                        isActive
+                          ? 'bg-slate-900 hover:bg-slate-800'
+                          : 'bg-slate-200 hover:bg-slate-300'
+                      }`}
+                      title={`Hour ${i}:00 - ${i + 1}:00`}
+                    />
+                  );
+                })}
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                Click blocks to set capacity (1-24 tasks per day)
+              </p>
             </div>
             <div>
               <label htmlFor="timezone" className="text-xs uppercase text-slate-400">

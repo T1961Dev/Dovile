@@ -19,10 +19,13 @@ export const RING_CONFIG: Record<
   }
 > = {
   life_area: { radius: 260, baseSize: 110 },
-  project: { radius: 210, baseSize: 46 },
-  process: { radius: 210, baseSize: 46 },
-  task: { radius: 150, baseSize: 30 },
-  idea: { radius: 230, baseSize: 26 },
+  // Projects/Processes on outer edge of life area
+  project: { radius: 285, baseSize: 46 },
+  process: { radius: 285, baseSize: 46 },
+  // Tasks flow outward from projects (actionable area, more inner than ideas)
+  task: { radius: 320, baseSize: 30 },
+  // Ideas flow most outward from projects (non-actionable area)
+  idea: { radius: 360, baseSize: 26 },
   vision: { radius: 320, baseSize: 56 },
 };
 
@@ -79,6 +82,7 @@ interface BubbleState {
   pinnedBubbleId: string | null;
   localPositions: Record<string, { ring: number; angle: number; x: number; y: number }>;
   currentUserId: string | null;
+  canvasZoom: number; // Zoom level for circle canvas (1.0 = 100%, 0.5 = 50%, 2.0 = 200%)
   hydrateFromServer: (payload: {
     lifeAreas: LifeAreaRow[];
     workstreams: WorkstreamRow[];
@@ -89,6 +93,7 @@ interface BubbleState {
   setZoomLevel: (zoom: BubbleState["zoomLevel"]) => void;
   setSelectedDate: (date: string) => void;
   setPinnedBubble: (id: string | null) => void;
+  setCanvasZoom: (zoom: number) => void;
   updateBubblePosition: (id: string, position: { ring: number; angle: number; x?: number; y?: number }) => void;
   getNextAngle: (
     type: BubbleType,
@@ -246,7 +251,7 @@ function spreadCluster(
     totalWidth = wedge;
   }
   // Add minimum spacing between bubbles
-  const minSpacing = 0.15; // Minimum angle between bubbles
+  const minSpacing = 0.2; // Increased minimum angle between bubbles for better spacing
   const calculatedStep = totalWidth / Math.max(1, sorted.length - 1);
   const step = Math.max(calculatedStep, minSpacing);
   const adjustedWidth = step * Math.max(1, sorted.length - 1);
@@ -311,6 +316,7 @@ function ensureBubbleDefaults(bubbles: Record<string, Bubble>): Record<string, B
 
   const bubbleById = new Map<string, Bubble>(Object.values(next).map((bubble) => [bubble.id, bubble]));
 
+  // First, position Projects/Processes on outer edge of life areas
   lifeAreaAngles.forEach((angle, lifeAreaId) => {
     const projects = Object.values(next).filter(
       (bubble) => bubble.lifeAreaId === lifeAreaId && (bubble.type === "project" || bubble.type === "process"),
@@ -318,45 +324,103 @@ function ensureBubbleDefaults(bubbles: Record<string, Bubble>): Record<string, B
     const adjustableProjects = projects.filter(
       (bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null),
     );
+    // Projects/Processes on outer edge of life area - spread around the life area angle
     spreadCluster(adjustableProjects, angle, RING_CONFIG.project.radius, RING_CONFIG.project.baseSize, Math.PI / 6);
-
-    const ideas = Object.values(next).filter(
-      (bubble) => bubble.lifeAreaId === lifeAreaId && bubble.type === "idea",
-    );
-    const adjustableIdeas = ideas.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-    spreadCluster(adjustableIdeas, angle, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, Math.PI / 5);
   });
 
+  // Then, position Tasks and Ideas flowing outward from their parent Projects/Processes
+  const projectById = new Map<string, Bubble>();
+  Object.values(next).forEach((bubble) => {
+    if (bubble.type === "project" || bubble.type === "process") {
+      projectById.set(bubble.id, bubble);
+    }
+  });
+
+  // Group tasks by their parent project/process
+  const tasks = Object.values(next).filter((bubble) => bubble.type === "task");
+  const taskGroupsByProject = new Map<string, Bubble[]>();
+  const taskGroupsByLifeArea = new Map<string, Bubble[]>();
+
+  tasks.forEach((task) => {
+    if (task.parentId && projectById.has(task.parentId)) {
+      if (!taskGroupsByProject.has(task.parentId)) {
+        taskGroupsByProject.set(task.parentId, []);
+      }
+      taskGroupsByProject.get(task.parentId)!.push(task);
+    } else if (task.lifeAreaId) {
+      if (!taskGroupsByLifeArea.has(task.lifeAreaId)) {
+        taskGroupsByLifeArea.set(task.lifeAreaId, []);
+      }
+      taskGroupsByLifeArea.get(task.lifeAreaId)!.push(task);
+    }
+  });
+
+  // Position tasks flowing outward from their parent project/process
+  taskGroupsByProject.forEach((group, projectId) => {
+    const project = projectById.get(projectId);
+    if (!project) return;
+    const projectAngle = project.bubblePosition?.angle ?? 0;
+    const adjustableTasks = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
+    // Tasks flow outward in a line from the project
+    spreadCluster(adjustableTasks, projectAngle, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, Math.PI / 8);
+  });
+
+  // Position tasks without projects by life area
+  taskGroupsByLifeArea.forEach((group, lifeAreaId) => {
+    const lifeAreaAngle = lifeAreaAngles.get(lifeAreaId) ?? 0;
+    const adjustableTasks = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
+    spreadCluster(adjustableTasks, lifeAreaAngle, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, Math.PI / 7);
+  });
+
+  // Group ideas by their parent project/process
+  const ideas = Object.values(next).filter((bubble) => bubble.type === "idea");
+  const ideaGroupsByProject = new Map<string, Bubble[]>();
+  const ideaGroupsByLifeArea = new Map<string, Bubble[]>();
+
+  ideas.forEach((idea) => {
+    if (idea.parentId && projectById.has(idea.parentId)) {
+      if (!ideaGroupsByProject.has(idea.parentId)) {
+        ideaGroupsByProject.set(idea.parentId, []);
+      }
+      ideaGroupsByProject.get(idea.parentId)!.push(idea);
+    } else if (idea.lifeAreaId) {
+      if (!ideaGroupsByLifeArea.has(idea.lifeAreaId)) {
+        ideaGroupsByLifeArea.set(idea.lifeAreaId, []);
+      }
+      ideaGroupsByLifeArea.get(idea.lifeAreaId)!.push(idea);
+    }
+  });
+
+  // Position ideas flowing most outward from their parent project/process
+  ideaGroupsByProject.forEach((group, projectId) => {
+    const project = projectById.get(projectId);
+    if (!project) return;
+    const projectAngle = project.bubblePosition?.angle ?? 0;
+    const adjustableIdeas = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
+    // Ideas flow most outward in a line from the project
+    spreadCluster(adjustableIdeas, projectAngle, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, Math.PI / 8);
+  });
+
+  // Position ideas without projects by life area
+  ideaGroupsByLifeArea.forEach((group, lifeAreaId) => {
+    const lifeAreaAngle = lifeAreaAngles.get(lifeAreaId) ?? 0;
+    const adjustableIdeas = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
+    spreadCluster(adjustableIdeas, lifeAreaAngle, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, Math.PI / 7);
+  });
+
+  // Handle unassigned ideas (no life area)
   const unassignedIdeas = Object.values(next).filter(
     (bubble) => bubble.type === "idea" && !bubble.lifeAreaId,
   );
-  spreadCluster(unassignedIdeas, -Math.PI / 2, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, TWO_PI - 0.2);
+  const adjustableUnassignedIdeas = unassignedIdeas.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
+  spreadCluster(adjustableUnassignedIdeas, -Math.PI / 2, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, TWO_PI - 0.2);
 
-  const tasks = Object.values(next).filter((bubble) => bubble.type === "task");
-
-  const taskGroups = new Map<string, Bubble[]>();
-  tasks.forEach((task) => {
-    const parent = task.parentId ? bubbleById.get(task.parentId) : undefined;
-    const key = parent?.id ?? task.lifeAreaId ?? "ungrouped";
-    if (!taskGroups.has(key)) {
-      taskGroups.set(key, []);
-    }
-    taskGroups.get(key)!.push(task);
-  });
-
-  taskGroups.forEach((group, key) => {
-    let centreAngle = 0;
-    if (bubbleById.has(key)) {
-      centreAngle = bubbleById.get(key)!.bubblePosition?.angle ?? 0;
-    } else if (lifeAreaAngles.has(key)) {
-      centreAngle = lifeAreaAngles.get(key)!;
-    } else if (key === "ungrouped") {
-      centreAngle = -Math.PI / 2;
-    }
-    const wedge = key === "ungrouped" ? TWO_PI - 0.2 : Math.PI / 7;
-    const adjustableTasks = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-    spreadCluster(adjustableTasks, centreAngle, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, wedge);
-  });
+  // Handle unassigned tasks (no life area, no project)
+  const unassignedTasks = Object.values(next).filter(
+    (bubble) => bubble.type === "task" && !bubble.lifeAreaId && !bubble.parentId,
+  );
+  const adjustableUnassignedTasks = unassignedTasks.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
+  spreadCluster(adjustableUnassignedTasks, -Math.PI / 2, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, TWO_PI - 0.2);
 
   return next;
 }
@@ -370,6 +434,7 @@ export const useBubbleStore = create<BubbleState>()(
       pinnedBubbleId: null,
       localPositions: {},
       currentUserId: null,
+      canvasZoom: 1.0,
       hydrateFromServer: ({ lifeAreas, workstreams, items }) => {
         const state = get();
         const localPositions = state.localPositions;
@@ -457,6 +522,7 @@ export const useBubbleStore = create<BubbleState>()(
       setZoomLevel: (zoom) => set({ zoomLevel: zoom }),
       setSelectedDate: (date) => set({ selectedDate: date }),
       setPinnedBubble: (id) => set({ pinnedBubbleId: id }),
+      setCanvasZoom: (zoom) => set({ canvasZoom: Math.max(0.25, Math.min(3.0, zoom)) }),
       updateBubblePosition: (id, position) =>
         set((state) => {
           const bubble = state.bubbles[id];
@@ -538,8 +604,8 @@ export const useBubbleStore = create<BubbleState>()(
         const arc = wedge ?? (() => {
           if (type === "life_area") return TWO_PI;
           if (type === "project" || type === "process") return Math.PI / 2;
-          if (type === "task") return Math.PI / 3;
-          if (type === "idea") return Math.PI / 2;
+          if (type === "task") return Math.PI / 4; // Smaller wedge for better spacing
+          if (type === "idea") return Math.PI / 3; // Smaller wedge for better spacing
           return TWO_PI;
         })();
 
@@ -564,6 +630,7 @@ export const useBubbleStore = create<BubbleState>()(
             pinnedBubbleId: null,
             zoomLevel: "day",
             selectedDate: today,
+            canvasZoom: 1.0,
           };
         }),
       reset: () =>
@@ -574,6 +641,7 @@ export const useBubbleStore = create<BubbleState>()(
           pinnedBubbleId: null,
           localPositions: {},
           currentUserId: null,
+          canvasZoom: 1.0,
         }),
     }),
     {
@@ -585,6 +653,7 @@ export const useBubbleStore = create<BubbleState>()(
         pinnedBubbleId: state.pinnedBubbleId,
         localPositions: state.localPositions,
         currentUserId: state.currentUserId,
+        canvasZoom: state.canvasZoom,
       }),
     },
   ),

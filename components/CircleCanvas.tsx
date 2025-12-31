@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useEffect } from "react";
 import { motion, type PanInfo } from "framer-motion";
 
 import clsx from "clsx";
@@ -34,17 +34,17 @@ const PALETTE = {
 };
 
 function determineDropTarget(distance: number): DropTarget {
-  const boundaryTask =
-    (RING_CONFIG.task.radius + RING_CONFIG.idea.radius) / 2;
-  const boundaryIdea =
-    (RING_CONFIG.idea.radius + RING_CONFIG.project.radius) / 2;
-  const boundaryProject =
-    (RING_CONFIG.project.radius + RING_CONFIG.life_area.radius) / 2;
+  // Updated boundaries based on new layout:
+  // life_area: 260, project: 285, task: 320, idea: 360
+  const boundaryProject = (RING_CONFIG.life_area.radius + RING_CONFIG.project.radius) / 2; // ~272
+  const boundaryTask = (RING_CONFIG.project.radius + RING_CONFIG.task.radius) / 2; // ~302
+  const boundaryIdea = (RING_CONFIG.task.radius + RING_CONFIG.idea.radius) / 2; // ~340
 
-  if (distance <= boundaryTask) return "task";
-  if (distance <= boundaryIdea) return "idea";
-  if (distance <= boundaryProject) return "project";
-  return "life_area";
+  if (distance <= RING_CONFIG.life_area.radius) return "life_area";
+  if (distance <= boundaryProject) return "life_area"; // Near life area edge
+  if (distance <= boundaryTask) return "project"; // Near project/process
+  if (distance <= boundaryIdea) return "task"; // Task area
+  return "idea"; // Idea area (most outer)
 }
 
 export function CircleCanvas({
@@ -54,8 +54,11 @@ export function CircleCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasPanRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const isPanningRef = useRef(false);
+  const pinchZoomRef = useRef<{ distance: number; centerX: number; centerY: number } | null>(null);
   const bubbles = useBubbleStore((state) => state.bubbles);
   const pinnedBubbleId = useBubbleStore((state) => state.pinnedBubbleId);
+  const canvasZoom = useBubbleStore((state) => state.canvasZoom);
+  const setCanvasZoom = useBubbleStore((state) => state.setCanvasZoom);
   const setPinnedBubble = useBubbleStore((state) => state.setPinnedBubble);
   const updateBubblePosition = useBubbleStore((state) => state.updateBubblePosition);
 
@@ -105,6 +108,49 @@ export function CircleCanvas({
     isPanningRef.current = false;
   };
 
+  // Handle mouse wheel zoom
+  const handleWheel = (e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    const newZoom = Math.max(0.25, Math.min(3.0, canvasZoom * delta));
+    setCanvasZoom(newZoom);
+  };
+
+  // Handle pinch zoom (touch)
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const distance = Math.hypot(
+        touch2.clientX - touch1.clientX,
+        touch2.clientY - touch1.clientY
+      );
+      const centerX = (touch1.clientX + touch2.clientX) / 2;
+      const centerY = (touch1.clientY + touch2.clientY) / 2;
+      pinchZoomRef.current = { distance, centerX, centerY };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && pinchZoomRef.current && containerRef.current) {
+      e.preventDefault();
+      const touch1 = e.touches[0];
+      const touch2 = e.touches[1];
+      const distance = Math.hypot(
+        touch2.clientX - touch1.clientX,
+        touch2.clientY - touch1.clientY
+      );
+      const scale = distance / pinchZoomRef.current.distance;
+      const newZoom = Math.max(0.25, Math.min(3.0, canvasZoom * scale));
+      setCanvasZoom(newZoom);
+      pinchZoomRef.current.distance = distance;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    pinchZoomRef.current = null;
+  };
+
   const handleDragEnd = (bubble: Bubble, info: PanInfo) => {
     const container = containerRef.current;
     if (!container) return;
@@ -148,12 +194,56 @@ export function CircleCanvas({
   return (
     <div
       ref={containerRef}
-      className="relative flex h-[640px] w-[640px] items-center justify-center overflow-visible bg-transparent"
+      className="relative flex h-[640px] w-[640px] max-h-[90vh] max-w-[90vw] items-center justify-center overflow-visible bg-transparent origin-center"
+      style={{ 
+        cursor: isPanningRef.current ? "grabbing" : "grab",
+        touchAction: "pan-x pan-y pinch-zoom",
+        transform: `scale(${canvasZoom})`,
+        transformOrigin: "center center",
+      }}
+      onWheel={handleWheel}
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleCanvasMouseMove}
       onMouseUp={handleCanvasMouseUp}
       onMouseLeave={handleCanvasMouseUp}
-      style={{ cursor: isPanningRef.current ? "grabbing" : "grab" }}
+      onTouchStart={(e) => {
+        if (e.touches.length === 2) {
+          handleTouchStart(e);
+        } else {
+          const target = e.target as HTMLElement;
+          const isBubble = target.closest('[data-bubble-id]');
+          if (!isBubble) {
+            const touch = e.touches[0];
+            isPanningRef.current = true;
+            canvasPanRef.current = { x: touch.clientX, y: touch.clientY };
+          }
+        }
+      }}
+      onTouchMove={(e) => {
+        if (e.touches.length === 2) {
+          handleTouchMove(e);
+        } else if (isPanningRef.current && containerRef.current && e.touches.length === 1) {
+          const touch = e.touches[0];
+          const deltaX = touch.clientX - canvasPanRef.current.x;
+          const deltaY = touch.clientY - canvasPanRef.current.y;
+          
+          const container = containerRef.current;
+          // Extract translate values from transform, ignoring scale
+          const currentTransform = container.style.transform || `translate(0px, 0px) scale(${canvasZoom})`;
+          const translateMatch = currentTransform.match(/translate\(([^,]+)px,\s*([^)]+)\)px/);
+          const currentX = translateMatch ? parseFloat(translateMatch[1]) || 0 : 0;
+          const currentY = translateMatch ? parseFloat(translateMatch[2]) || 0 : 0;
+          
+          container.style.transform = `translate(${currentX + deltaX}px, ${currentY + deltaY}px) scale(${canvasZoom})`;
+          canvasPanRef.current = { x: touch.clientX, y: touch.clientY };
+        }
+      }}
+      onTouchEnd={(e) => {
+        handleTouchEnd();
+        if (e.touches.length === 0) {
+          isPanningRef.current = false;
+        }
+      }}
     >
       <Backdrop />
       <RadialGrid />
@@ -187,10 +277,15 @@ export function CircleCanvas({
               return "#28B7A3";
             case "process":
               return "#FF8F5A";
-            case "task":
-              return "#F4B13E";
+            case "task": {
+              // Task status colors: To-do (orange), In progress (blue), Done (green)
+              if (bubble.status === "done") return "#0EA8A8"; // teal (brand color for done)
+              if (bubble.status === "in_progress") return "#3b82f6"; // blue
+              // pending/default - warm orange
+              return "#F4B13E"; // warm orange (matches brand palette)
+            }
             case "idea":
-              return "#8F8CF5";
+              return "#A8B0B8"; // softer grey
             default:
               return "#8F8CF5";
           }
@@ -241,12 +336,14 @@ export function CircleCanvas({
                 ? "border-[3px] shadow-[0_16px_40px_-24px_rgba(15,23,42,0.35)]"
                 : "shadow-[0_20px_40px_-28px_rgba(8,15,23,0.45)]",
               pinnedBubbleId === bubble.id ? "scale-110" : "hover:scale-[1.05]",
+              // Make task/idea bubbles slightly larger to accommodate text
+              isTaskOrIdea ? "min-w-[70px] min-h-[70px]" : "",
             )}
             style={{
-              width: size,
-              height: size,
-              left: targetX - size / 2,
-              top: targetY - size / 2,
+              width: isTaskOrIdea ? Math.max(size, 70) : size,
+              height: isTaskOrIdea ? Math.max(size, 70) : size,
+              left: targetX - (isTaskOrIdea ? Math.max(size, 70) : size) / 2,
+              top: targetY - (isTaskOrIdea ? Math.max(size, 70) : size) / 2,
               background: fillStyle,
               borderColor: isLifeArea ? "var(--primary)" : "transparent",
               zIndex,
@@ -289,14 +386,11 @@ export function CircleCanvas({
                 {bubble.title}
               </span>
             ) : isTaskOrIdea ? (
-              <span
-                className={clsx(
-                  "block h-[70%] w-[70%] rounded-full border-2",
-                  bubble.type === "task"
-                    ? "border-white/80 bg-white/60"
-                    : "border-white/80 bg-transparent",
-                )}
-              />
+              <div className="flex h-full w-full flex-col items-center justify-center px-1.5">
+                <span className="text-[8px] font-semibold text-white text-center leading-tight px-1 line-clamp-2 mix-blend-difference">
+                  {bubble.title.split(' ').slice(0, 4).join(' ')}
+                </span>
+              </div>
             ) : null}
           </motion.div>
         );

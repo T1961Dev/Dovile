@@ -236,4 +236,35 @@ export async function getItemAction(id: string): Promise<ItemRow | null> {
   return data as ItemRow | null;
 }
 
+export async function getArchivedIdeasAction(lifeAreaId?: string): Promise<ItemRow[]> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Unauthorized");
+  }
+
+  let query = (supabase
+    .from("items")
+    .select("*") as any)
+    .eq("user_id", user.id)
+    .eq("type", "idea")
+    .eq("status", "archived")
+    .order("created_at", { ascending: false });
+  
+  if (lifeAreaId) {
+    query = query.eq("life_area_id", lifeAreaId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []) as ItemRow[];
+}
+
 

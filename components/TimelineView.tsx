@@ -172,7 +172,7 @@ export function TimelineView({ timezone }: TimelineViewProps) {
   const [selectedBucketId, setSelectedBucketId] = useState<string | null>(null);
   const events = useDashboardStore((state) => state.events);
   const [showTimeAllocation, setShowTimeAllocation] = useState(true);
-  const [showTimeline, setShowTimeline] = useState(true);
+  const [showTimeline, setShowTimeline] = useState(false);
 
   const safeSelectedDate = (() => {
     const parsed = parseNullableISO(selectedDate);
@@ -211,21 +211,10 @@ export function TimelineView({ timezone }: TimelineViewProps) {
     if (selectedDate) {
       const currentZoom = zoomLevel || "day";
       const scope = currentZoom === "day" ? "daily" : "full";
-      fetch(`/api/timeline?date=${selectedDate}&mode=${timelineMode}&scope=${scope}&tz=${encodeURIComponent(timezone)}`, {
-        credentials: "include",
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-          }
-          const contentType = res.headers.get("content-type");
-          if (!contentType || !contentType.includes("application/json")) {
-            const text = await res.text();
-            throw new Error(`Expected JSON but got ${contentType}. Response: ${text.substring(0, 200)}`);
-          }
-          return res.json();
-        })
-        .then((payload) => {
+      (async () => {
+        try {
+          const { getTimelineData } = await import("@/actions/timeline");
+          const payload = await getTimelineData(selectedDate, timelineMode, scope, timezone);
           hydrate({
             date: selectedDate,
             areas: payload.areas ?? [],
@@ -234,10 +223,24 @@ export function TimelineView({ timezone }: TimelineViewProps) {
             ideas: payload.ideas ?? [],
             events: payload.events ?? [],
           });
-          const wheelItems = [
-            ...(payload.allTasks ?? payload.todayTasks ?? []),
-            ...(payload.ideas ?? []),
-          ];
+          // For timeline: show appropriate items based on date
+          // Past dates: done tasks only
+          // Today: pending/in_progress tasks + all ideas
+          // Future: pending/in_progress tasks + all ideas  
+          // Full scope from today: all items except done tasks
+          const today = new Date().toISOString().slice(0, 10);
+          const isPast = selectedDate < today;
+          const isToday = selectedDate === today;
+          
+          const wheelItems = isPast
+            ? [
+                ...(payload.todayTasks?.filter((t: any) => t.status === "done") ?? []),
+                ...(payload.ideas ?? []),
+              ]
+            : [
+                ...(payload.todayTasks ?? []),
+                ...(payload.ideas ?? []),
+              ];
           hydrateBubbles({
             lifeAreas: payload.areas ?? [],
             workstreams: payload.workstreams ?? [],
@@ -255,10 +258,10 @@ export function TimelineView({ timezone }: TimelineViewProps) {
             resourceBlocks: payload.resourceBlocks?.length ?? 0,
             availableTime: payload.availableTime,
           });
-        })
-        .catch((error) => {
+        } catch (error) {
           console.error("Failed to reload timeline data:", error);
-        });
+        }
+      })();
     }
   }, [setZoomLevel, timelineMode, timezone, hydrate, hydrateBubbles, setEvents, selectedDate, zoomLevel]);
 
@@ -425,18 +428,9 @@ export function TimelineView({ timezone }: TimelineViewProps) {
                 setSelectedBucketId(bucket.id);
                 try {
                   const scope = zoomLevel === "day" ? "daily" : "full";
-                  const response = await fetch(`/api/timeline?date=${newDate}&mode=${timelineMode}&scope=${scope}&tz=${encodeURIComponent(timezone)}`, {
-                    credentials: "include",
-                  });
-                  if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                  }
-                  const contentType = response.headers.get("content-type");
-                  if (!contentType || !contentType.includes("application/json")) {
-                    const text = await response.text();
-                    throw new Error(`Expected JSON but got ${contentType}. Response: ${text.substring(0, 200)}`);
-                  }
-                  const payload = await response.json();
+                  const { getTimelineData } = await import("@/actions/timeline");
+                  const payload = await getTimelineData(newDate, timelineMode, scope, timezone);
+                  
                   hydrate({
                     date: newDate,
                     areas: payload.areas ?? [],
@@ -445,10 +439,18 @@ export function TimelineView({ timezone }: TimelineViewProps) {
                     ideas: payload.ideas ?? [],
                     events: payload.events ?? [],
                   });
-                  const wheelItems = [
-                    ...(payload.allTasks ?? payload.todayTasks ?? []),
-                    ...(payload.ideas ?? []),
-                  ];
+                  // Filter items based on date for timeline view
+                  const today = new Date().toISOString().slice(0, 10);
+                  const isPast = newDate < today;
+                  const wheelItems = isPast
+                    ? [
+                        ...(payload.todayTasks?.filter((t: any) => t.status === "done") ?? []),
+                        ...(payload.ideas ?? []),
+                      ]
+                    : [
+                        ...(payload.todayTasks ?? []),
+                        ...(payload.ideas ?? []),
+                      ];
                   hydrateBubbles({
                     lifeAreas: payload.areas ?? [],
                     workstreams: payload.workstreams ?? [],
@@ -489,7 +491,6 @@ export function TimelineView({ timezone }: TimelineViewProps) {
                   </span>
                 ) : null}
               </div>
-              {isActive ? <div className="h-1 w-full rounded-full bg-[#0EA8A8]" /> : null}
             </button>
           );
         })}
