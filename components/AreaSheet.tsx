@@ -36,8 +36,8 @@ export function AreaSheet() {
   const workstreams = useDashboardStore((state) => state.workstreams);
   const tasks = useDashboardStore((state) => state.tasks);
   const ideas = useDashboardStore((state) => state.ideas);
-  const setWorkstreams = useDashboardStore((state) => state.setWorkstreams);
   const setAreas = useDashboardStore((state) => state.setAreas);
+  const setWorkstreams = useDashboardStore((state) => state.setWorkstreams);
   const upsertItem = useDashboardStore((state) => state.upsertItem);
   const upsertBubble = useBubbleStore((state) => state.upsertBubble);
   const removeBubble = useBubbleStore((state) => state.removeBubble);

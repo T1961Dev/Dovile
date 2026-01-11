@@ -239,8 +239,8 @@ export function TimelineView({ timezone }: TimelineViewProps) {
               ]
             : [
                 ...(payload.todayTasks ?? []),
-                ...(payload.ideas ?? []),
-              ];
+            ...(payload.ideas ?? []),
+          ];
           hydrateBubbles({
             lifeAreas: payload.areas ?? [],
             workstreams: payload.workstreams ?? [],
@@ -449,8 +449,8 @@ export function TimelineView({ timezone }: TimelineViewProps) {
                       ]
                     : [
                         ...(payload.todayTasks ?? []),
-                        ...(payload.ideas ?? []),
-                      ];
+                    ...(payload.ideas ?? []),
+                  ];
                   hydrateBubbles({
                     lifeAreas: payload.areas ?? [],
                     workstreams: payload.workstreams ?? [],

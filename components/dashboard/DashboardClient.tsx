@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
 
-import { Pencil, LogOut } from "lucide-react";
+import { Pencil, LogOut, Menu, X } from "lucide-react";
 
 import { AvatarCoach } from "@/components/AvatarCoach";
 import { AreaSheet } from "@/components/AreaSheet";
@@ -165,13 +165,11 @@ function CanvasPanWrapper({ children }: { children: React.ReactNode }) {
     <>
       <div
         ref={containerRef}
-        className="relative"
+        className="relative w-full h-full"
         style={{ 
           cursor: panRef.current.isPanning ? 'grabbing' : 'grab',
           touchAction: 'none',
-          willChange: panRef.current.isPanning ? 'transform' : 'auto',
-          width: '100%',
-          height: '100%'
+          willChange: panRef.current.isPanning ? 'transform' : 'auto'
         }}
         onMouseDown={handleMouseDown}
         onMouseMove={(e) => handleMouseMove(e as any)}
@@ -182,7 +180,7 @@ function CanvasPanWrapper({ children }: { children: React.ReactNode }) {
       {/* Reset View Button - Fixed in lower right corner */}
       <button
         onClick={resetView}
-        className="fixed bottom-8 right-8 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-white shadow-lg border border-[#0EA8A8]/30 hover:bg-[#0EA8A8]/10 transition-colors"
+        className="fixed bottom-6 right-4 sm:bottom-8 sm:right-8 z-50 flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full bg-white shadow-lg border border-[#0EA8A8]/30 hover:bg-[#0EA8A8]/10 active:bg-[#0EA8A8]/20 transition-colors touch-manipulation"
         title="Center view"
         aria-label="Center view"
       >
@@ -241,6 +239,7 @@ export function DashboardClient({
   const supabase = createBrowserSupabaseClient();
   const [xpSummary, setXpSummary] = useState(initialXpSummary);
   const [hydrated, setHydrated] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const refreshXpSummary = useCallback(async () => {
     try {
@@ -882,54 +881,87 @@ export function DashboardClient({
 
   return (
     <div className="relative flex min-h-screen flex-col bg-[#FBF9F4] text-[#0B1918]" style={{ overflow: 'visible', touchAction: 'manipulation' }}>
-      <header className="px-4 pb-6 pt-6 sm:px-6 md:px-10 md:pb-8 md:pt-10 relative z-50">
+      <header className="px-4 pb-3 pt-4 sm:px-6 md:px-10 md:pb-4 md:pt-5 relative z-50">
+        {/* Mobile Menu Toggle Button */}
+        <div className="flex items-center justify-between mb-3 md:hidden">
+          <motion.h1
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1, duration: 0.4 }}
+            className="text-xl font-semibold tracking-tight text-[#0B1918]"
+          >
+            Life Scope
+          </motion.h1>
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="p-2 rounded-lg hover:bg-[#0EA8A8]/10 active:bg-[#0EA8A8]/20 transition-colors touch-manipulation"
+            aria-label="Toggle menu"
+          >
+            {mobileMenuOpen ? (
+              <X className="h-6 w-6 text-[#0B1918]" />
+            ) : (
+              <Menu className="h-6 w-6 text-[#0B1918]" />
+            )}
+          </button>
+        </div>
+
         <motion.div
-          className="flex flex-col gap-8"
+          className="flex flex-col gap-4"
           initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
         >
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)_minmax(280px,1fr)] xl:grid-cols-[minmax(0,1fr)_320px_minmax(300px,1fr)] items-start">
-            <div className="space-y-4">
-              <div className="space-y-1.5">
+          {/* Collapsible Content */}
+          <motion.div
+            initial={false}
+            animate={{
+              height: mobileMenuOpen ? "auto" : 0,
+              opacity: mobileMenuOpen ? 1 : 0,
+            }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden md:!h-auto md:!opacity-100 md:!block"
+          >
+            <div className="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)_minmax(280px,1fr)] xl:grid-cols-[minmax(0,1fr)_320px_minmax(300px,1fr)] items-start pb-4 md:pb-0">
+            <div className="space-y-2 md:col-span-2 lg:col-span-1">
+              <div className="space-y-0.5 md:block">
                 <motion.h1
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.1, duration: 0.4 }}
-                  className="text-3xl font-semibold tracking-tight text-[#0B1918] sm:text-[2.5rem]"
+                  className="text-xl sm:text-2xl font-semibold tracking-tight text-[#0B1918] md:text-3xl hidden md:block"
                 >
                   Life Scope
                 </motion.h1>
-                <p className="text-sm text-[#195552]">Plan your entire life beautifully.</p>
+                <p className="text-[10px] sm:text-xs text-[#195552] hidden md:block">Plan your entire life beautifully.</p>
               </div>
-              <div className="flex flex-col gap-3">
-                <div className="flex h-11 w-full max-w-xl items-center gap-3 rounded-full border border-[#0EA8A8]/25 bg-white px-4 shadow-[0_10px_24px_-20px_rgba(15,75,68,0.35)]">
+              <div className="flex flex-col gap-2">
+                <div className="flex h-8 sm:h-9 w-full max-w-xl items-center gap-1.5 sm:gap-2 rounded-full border border-[#0EA8A8]/25 bg-white px-2 sm:px-3 shadow-[0_10px_24px_-20px_rgba(15,75,68,0.35)]">
                   <Input
                     placeholder="Add a task or idea..."
-                    className="h-full flex-1 border-0 bg-transparent text-sm text-[#0B1918] placeholder:text-[#0EA8A8]/60 focus-visible:ring-0 focus-visible:ring-offset-0"
+                    className="h-full flex-1 border-0 bg-transparent text-[10px] sm:text-xs text-[#0B1918] placeholder:text-[#0EA8A8]/60 focus-visible:ring-0 focus-visible:ring-offset-0"
                     onFocus={() => setCoachOpen(true)}
                     readOnly
                   />
-                  <Pencil className="h-4 w-4 text-[#0EA8A8]" />
+                  <Pencil className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-[#0EA8A8] flex-shrink-0" />
                   <Button
                     onClick={() => setCoachOpen(true)}
-                    className="h-9 rounded-full bg-[#FFD833] px-5 text-sm font-semibold text-[#0B1918] shadow-sm transition hover:bg-[#FECB32]"
+                    className="h-6 sm:h-7 rounded-full bg-[#FFD833] px-3 sm:px-4 text-[10px] sm:text-xs font-semibold text-[#0B1918] shadow-sm transition hover:bg-[#FECB32] flex-shrink-0"
                   >
                     Add
                   </Button>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1 sm:gap-1.5">
                   <Button
                     variant="outline"
                     onClick={() => setEmptyHeadOpen(true)}
-                    className="h-9 rounded-full border-[#0EA8A8]/30 bg-white px-4 text-xs font-semibold text-[#0EA8A8] hover:border-[#0EA8A8]/60"
+                    className="h-6 sm:h-7 rounded-full border-[#0EA8A8]/30 bg-white px-2 sm:px-3 text-[9px] sm:text-[10px] font-semibold text-[#0EA8A8] hover:border-[#0EA8A8]/60"
                   >
                     DUMP MODE
                   </Button>
                   <Button
                     variant="outline"
                     onClick={() => setPlannerOpen(true)}
-                    className="h-9 rounded-full border-[#FFD833]/50 bg-[#FFF4DB] px-4 text-xs font-semibold text-[#0B1918] hover:border-[#FFD833]/70"
+                    className="h-6 sm:h-7 rounded-full border-[#FFD833]/50 bg-[#FFF4DB] px-2 sm:px-3 text-[9px] sm:text-[10px] font-semibold text-[#0B1918] hover:border-[#FFD833]/70"
                   >
                     PLANNER MODE
                   </Button>
@@ -937,30 +969,28 @@ export function DashboardClient({
               </div>
             </div>
 
-            <div className="flex flex-col items-center gap-3 rounded-3xl border border-[#0EA8A8]/20 bg-white/80 px-5 py-4 shadow-[0_18px_45px_-30px_rgba(14,168,168,0.45)] backdrop-blur-sm relative z-50">
+            <div className="flex flex-col items-center sm:items-start gap-2 rounded-2xl border border-[#0EA8A8]/20 bg-white/80 px-2 sm:px-3 py-2 shadow-[0_18px_45px_-30px_rgba(14,168,168,0.45)] backdrop-blur-sm relative z-50 md:col-span-1">
               <GamificationHUD summary={xpSummary} />
               <ScopeZoomControl timezone={timezone} />
               <Button
                 variant="outline"
                 onClick={() => setWheelOverlayOpen(true)}
-                className="h-9 rounded-full border-[#0EA8A8]/40 px-5 text-xs font-semibold text-[#0EA8A8] hover:border-[#0EA8A8]/70"
+                className="h-6 sm:h-7 w-full sm:w-auto rounded-full border-[#0EA8A8]/40 px-2 sm:px-3 text-[9px] sm:text-[10px] font-semibold text-[#0EA8A8] hover:border-[#0EA8A8]/70"
               >
                 View Wheel of Life
               </Button>
             </div>
 
-            <div className="flex flex-col items-end gap-3 relative z-50">
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="ghost"
-                  onClick={handleLogout}
-                  className="h-9 rounded-full px-3 text-xs font-semibold text-[#195552] hover:text-[#0B1918] hover:bg-[#0EA8A8]/10"
-                  title="Log out"
-                >
-                  <LogOut className="h-4 w-4 mr-1.5" />
-                  Logout
-                </Button>
-              </div>
+            <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 relative z-50 md:col-span-1 lg:col-span-1">
+              <Button
+                variant="ghost"
+                onClick={handleLogout}
+                className="h-6 sm:h-7 rounded-full px-2 sm:px-2.5 text-[9px] sm:text-[10px] font-semibold text-[#195552] hover:text-[#0B1918] hover:bg-[#0EA8A8]/10 order-2 sm:order-1"
+                title="Log out"
+              >
+                <LogOut className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-1" />
+                <span className="hidden sm:inline">Logout</span>
+              </Button>
               <CapacityHUD
                 scheduledCount={tasks.length}
                 capacity={dailyCapacity}
@@ -970,40 +1000,40 @@ export function DashboardClient({
               />
             </div>
           </div>
+          </motion.div>
         </motion.div>
       </header>
 
-      <main className="relative flex-1" style={{ position: 'relative', overflow: 'visible', width: '100%', height: '100%', touchAction: 'manipulation', paddingBottom: '140px' }}>
-        <CanvasPanWrapper>
-          <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-8 px-2 sm:px-4 md:px-6" style={{ position: 'relative', minHeight: '100vh', width: '100%' }}>
-            <motion.section
-              className="relative flex flex-1 items-center justify-center w-full overflow-auto"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: hydrated ? 1 : 0 }}
-              style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
-            >
-              <div className="w-full h-full flex items-center justify-center p-4">
+      <main className="relative flex-1" style={{ position: 'relative', overflow: 'visible', width: '100%', touchAction: 'manipulation' }}>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <CanvasPanWrapper>
+            <div className="w-full flex items-center justify-center" style={{ height: '100%' }}>
+              <motion.section
+                className="relative flex items-center justify-center"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: hydrated ? 1 : 0 }}
+                style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
+              >
                 <CircleCanvas
                   onSelectBubble={handleSelectBubble}
                   onBubbleDrop={handleBubbleDrop}
                 />
-              </div>
-            </motion.section>
-
-          </div>
-        </CanvasPanWrapper>
-        
-        {/* Day-by-day timeline locked to bottom */}
-        <div className="fixed bottom-0 left-0 right-0 z-40 pointer-events-none">
-          <div className="pointer-events-auto">
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: hydrated ? 1 : 0, y: hydrated ? 0 : 12 }}
-            >
-              <DayByDayTimeline timezone={timezone} />
-            </motion.div>
-          </div>
+              </motion.section>
+            </div>
+          </CanvasPanWrapper>
         </div>
+        
+        {/* Day-by-day timeline - floating element */}
+        {hydrated ? (
+          <motion.div
+            className="fixed left-1/2 transform -translate-x-1/2 z-40 w-[calc(100%-5rem)] sm:w-auto max-w-2xl"
+            style={{ bottom: 'clamp(1rem, 1.5rem, 2rem)' }}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <DayByDayTimeline timezone={timezone} />
+          </motion.div>
+        ) : null}
 
         {/* Avatar Coach button - fixed bottom left */}
         {hydrated ? (

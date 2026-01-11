@@ -84,27 +84,27 @@ export function WheelOfLifeOverlay() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="grid max-w-4xl grid-cols-1 gap-8 rounded-3xl border border-slate-100 bg-white p-10 shadow-2xl md:grid-cols-2 max-h-[90vh] overflow-hidden">
-        <div className="flex flex-col gap-6 md:col-span-1">
+      <DialogContent className="grid !max-w-[95vw] sm:!max-w-6xl grid-cols-1 gap-4 sm:gap-8 rounded-2xl sm:rounded-3xl border border-slate-100 bg-white p-4 sm:p-6 md:p-10 shadow-2xl md:grid-cols-2 max-h-[95vh] sm:max-h-[90vh] overflow-hidden">
+        <div className="flex flex-col gap-4 sm:gap-6 md:col-span-1">
           <DialogHeader className="text-left">
-            <DialogTitle className="text-2xl font-semibold text-slate-900">
+            <DialogTitle className="text-xl sm:text-2xl font-semibold text-slate-900">
               Wheel of Life
             </DialogTitle>
-            <p className="text-sm text-slate-600 mt-2">
+            <p className="text-xs sm:text-sm text-slate-600 mt-1 sm:mt-2">
               Rate your current feeling of satisfaction in each life area. Ask yourself: How do I feel in this life area today? No further questioning, just complete honesty. Save today's ratings by clicking the button at the bottom. You may repeat this coaching exercise monthly, quarterly, yearly or so.
             </p>
           </DialogHeader>
-          <div className="grid grid-cols-2 gap-4 overflow-y-auto pr-1 max-h-[calc(90vh-200px)]">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 overflow-y-auto pr-1 max-h-[calc(95vh-180px)] sm:max-h-[calc(90vh-200px)]">
           {data.map((area) => (
-            <div key={area.id} className="space-y-2 rounded-2xl border border-slate-100 bg-white/80 p-3 shadow-sm min-w-0">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-sm font-semibold text-slate-800">{area.name}</span>
-                  <p className="text-[11px] uppercase tracking-[0.25em] text-[#0EA8A8]">
+            <div key={area.id} className="space-y-2 rounded-xl sm:rounded-2xl border border-slate-100 bg-white/80 p-2 sm:p-3 shadow-sm min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <span className="text-xs sm:text-sm font-semibold text-slate-800 block truncate">{area.name}</span>
+                  <p className="text-[10px] sm:text-[11px] uppercase tracking-[0.2em] sm:tracking-[0.25em] text-[#0EA8A8]">
                     Current {pendingRatings[area.id] ?? area.rating}/10
                   </p>
                 </div>
-                <span className="text-xs text-slate-500">
+                <span className="text-[10px] sm:text-xs text-slate-500 flex-shrink-0">
                   {(history[area.id]?.[0]?.noted_at ?? "").slice(0, 10) || "—"}
                 </span>
               </div>
@@ -125,12 +125,12 @@ export function WheelOfLifeOverlay() {
           <Button
             onClick={handleSave}
             disabled={submitting}
-            className="w-full rounded-full bg-[#0EA8A8] text-white hover:bg-[#0C8F90] col-span-2"
+            className="w-full rounded-full bg-[#0EA8A8] text-white hover:bg-[#0C8F90] col-span-1 sm:col-span-2 text-sm sm:text-base h-10 sm:h-11"
           >
             {submitting ? "Saving…" : "Save ratings"}
           </Button>
         </div>
-        <div className="md:col-span-1">
+        <div className="md:col-span-1 hidden md:block">
           <RadarChart areas={areas} pendingRatings={pendingRatings} />
         </div>
       </DialogContent>

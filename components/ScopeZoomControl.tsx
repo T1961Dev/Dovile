@@ -29,17 +29,17 @@ export function ScopeZoomControl({ timezone = "Europe/London" }: ScopeZoomContro
     try {
       const { getTimelineData } = await import("@/actions/timeline");
       const payload = await getTimelineData(today, timelineMode, "full", timezone);
-      const wheelItems = [
-        ...(payload.allTasks ?? payload.todayTasks ?? []),
-        ...(payload.ideas ?? []),
-      ];
-      hydrateBubbles({
-        lifeAreas: payload.areas ?? [],
-        workstreams: payload.workstreams ?? [],
-        items: wheelItems,
-      });
+        const wheelItems = [
+          ...(payload.allTasks ?? payload.todayTasks ?? []),
+          ...(payload.ideas ?? []),
+        ];
+        hydrateBubbles({
+          lifeAreas: payload.areas ?? [],
+          workstreams: payload.workstreams ?? [],
+          items: wheelItems,
+        });
     } catch (error) {
-      console.error("Failed to update zoom:", error);
+        console.error("Failed to update zoom:", error);
     }
   };
 

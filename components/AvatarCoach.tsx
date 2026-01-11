@@ -164,7 +164,7 @@ export function AvatarCoach({
           <motion.button
             key="coach-floating"
             onClick={() => setOpen(true)}
-            className="fixed bottom-20 left-6 z-50 flex h-16 w-16 items-center justify-center rounded-full bg-[#0EA8A8] text-2xl text-white shadow-[0_16px_32px_-18px_rgba(14,168,168,0.5)]"
+            className="fixed bottom-6 left-4 sm:bottom-8 sm:left-6 z-50 flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-full bg-[#0EA8A8] text-xl sm:text-2xl text-white shadow-[0_16px_32px_-18px_rgba(14,168,168,0.5)] touch-manipulation active:scale-95"
             initial={{ scale: 0, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             exit={{ scale: 0.8, opacity: 0 }}
@@ -176,19 +176,19 @@ export function AvatarCoach({
       </AnimatePresence>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[85vh] w-[min(90vw,640px)] overflow-hidden rounded-3xl border border-[#0EA8A8]/25 bg-white p-0 text-[#0B1918] shadow-[0_35px_65px_-30px_rgba(14,168,168,0.45)]">
-          <div className="flex flex-col gap-6 p-6">
-            <DialogHeader className="flex flex-row items-center justify-between gap-3 rounded-2xl bg-[#D6FFF3]/40 p-4">
-              <div className="space-y-1">
-                <DialogTitle className="text-lg font-semibold text-[#0B1918]">Coach</DialogTitle>
-                <DialogDescription className="text-xs text-[#195552]">
+        <DialogContent className="max-h-[90vh] sm:max-h-[85vh] w-[calc(100vw-1rem)] sm:w-[min(90vw,640px)] overflow-hidden rounded-2xl sm:rounded-3xl border border-[#0EA8A8]/25 bg-white p-0 text-[#0B1918] shadow-[0_35px_65px_-30px_rgba(14,168,168,0.45)]">
+          <div className="flex flex-col gap-4 sm:gap-6 p-4 sm:p-6">
+            <DialogHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 rounded-xl sm:rounded-2xl bg-[#D6FFF3]/40 p-3 sm:p-4">
+              <div className="space-y-1 flex-1">
+                <DialogTitle className="text-base sm:text-lg font-semibold text-[#0B1918]">Coach</DialogTitle>
+                <DialogDescription className="text-[10px] sm:text-xs text-[#195552]">
                   Type in or make a voice memo of any small idea or task you have and I'll place it directly into correct life area and it's project for you.
                 </DialogDescription>
             </div>
             <Button
               variant="outline"
               size="sm"
-                className={`rounded-full border-[#0EA8A8]/30 bg-white px-4 py-1 text-xs font-medium text-[#0EA8A8] transition hover:border-[#0EA8A8]/60 ${
+                className={`rounded-full border-[#0EA8A8]/30 bg-white px-3 sm:px-4 py-1 text-[10px] sm:text-xs font-medium text-[#0EA8A8] transition hover:border-[#0EA8A8]/60 active:bg-[#0EA8A8]/10 touch-manipulation ${
                   recording ? "bg-[#FF7348]/10 text-[#FF7348]" : ""
                 }`}
               onClick={handleToggleRecording}
@@ -198,12 +198,12 @@ export function AvatarCoach({
             </DialogHeader>
           </div>
 
-          <div className="flex-1 space-y-4 overflow-y-auto border-t border-[#0EA8A8]/10 bg-[#F6FFFC] p-6">
+          <div className="flex-1 space-y-3 sm:space-y-4 overflow-y-auto border-t border-[#0EA8A8]/10 bg-[#F6FFFC] p-4 sm:p-6">
             <div className="space-y-3">
             {messages.map((message) => (
               <div
                 key={message.id}
-                  className={`max-w-[80%] rounded-3xl px-4 py-3 text-sm leading-relaxed shadow-lg ${
+                  className={`max-w-[85%] sm:max-w-[80%] rounded-2xl sm:rounded-3xl px-3 sm:px-4 py-2 sm:py-3 text-xs sm:text-sm leading-relaxed shadow-lg ${
                   message.role === "assistant"
                       ? "bg-white text-[#195552]"
                       : "ml-auto bg-[#0EA8A8] text-white"
@@ -215,24 +215,24 @@ export function AvatarCoach({
             </div>
           </div>
 
-          <div className="border-t border-[#0EA8A8]/10 bg-white p-6">
+          <div className="border-t border-[#0EA8A8]/10 bg-white p-4 sm:p-6">
           <form
             onSubmit={(event) => {
               event.preventDefault();
               void handleSubmit(input);
             }}
-              className="flex items-center gap-3"
+              className="flex items-center gap-2 sm:gap-3"
           >
             <Input
               value={input}
               onChange={(event) => setInput(event.target.value)}
               placeholder="Draft an idea…"
-                className="h-12 flex-1 rounded-full border border-[#0EA8A8]/20 bg-white text-sm text-[#0B1918] placeholder:text-[#0EA8A8]/60 focus-visible:border-[#0EA8A8] focus-visible:ring-0"
+                className="h-10 sm:h-12 flex-1 rounded-full border border-[#0EA8A8]/20 bg-white text-xs sm:text-sm text-[#0B1918] placeholder:text-[#0EA8A8]/60 focus-visible:border-[#0EA8A8] focus-visible:ring-0"
             />
             <Button
               type="submit"
               disabled={loading}
-                className="h-12 rounded-full bg-[#FFD833] px-6 text-sm font-semibold text-[#0B1918] shadow-sm transition hover:bg-[#FFC300]"
+                className="h-10 sm:h-12 rounded-full bg-[#FFD833] px-4 sm:px-6 text-xs sm:text-sm font-semibold text-[#0B1918] shadow-sm transition hover:bg-[#FFC300] active:bg-[#FFB800] touch-manipulation flex-shrink-0"
             >
               Send
             </Button>

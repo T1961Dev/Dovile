@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useEffect } from "react";
+import { useMemo, useRef, useEffect, useState } from "react";
 import { motion, type PanInfo } from "framer-motion";
 
 import clsx from "clsx";
@@ -55,12 +55,47 @@ export function CircleCanvas({
   const canvasPanRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const isPanningRef = useRef(false);
   const pinchZoomRef = useRef<{ distance: number; centerX: number; centerY: number } | null>(null);
+  const [containerSize, setContainerSize] = useState(CANVAS_SIZE);
   const bubbles = useBubbleStore((state) => state.bubbles);
   const pinnedBubbleId = useBubbleStore((state) => state.pinnedBubbleId);
   const canvasZoom = useBubbleStore((state) => state.canvasZoom);
   const setCanvasZoom = useBubbleStore((state) => state.setCanvasZoom);
   const setPinnedBubble = useBubbleStore((state) => state.setPinnedBubble);
   const updateBubblePosition = useBubbleStore((state) => state.updateBubblePosition);
+
+  // Measure actual container size for responsive positioning
+  // Use offsetWidth/offsetHeight to get size BEFORE transform scale is applied
+  useEffect(() => {
+    const updateSize = () => {
+      if (containerRef.current) {
+        // Use offsetWidth/offsetHeight to get logical size (before transform scale)
+        const width = containerRef.current.offsetWidth;
+        const height = containerRef.current.offsetHeight;
+        const size = Math.min(width, height);
+        if (size > 0) {
+          setContainerSize(size);
+        }
+      }
+    };
+    
+    // Use ResizeObserver for more accurate size tracking
+    if (containerRef.current) {
+      // Initial measurement
+      updateSize();
+      
+      // Also use ResizeObserver for window resize/zoom changes
+      const resizeObserver = new ResizeObserver(updateSize);
+      resizeObserver.observe(containerRef.current);
+      
+      // Also listen to window resize as backup
+      window.addEventListener('resize', updateSize);
+      
+      return () => {
+        resizeObserver.disconnect();
+        window.removeEventListener('resize', updateSize);
+      };
+    }
+  }, []);
 
   const layout = useMemo(() => {
     const bubbleArray = Object.values(bubbles);
@@ -160,11 +195,14 @@ export function CircleCanvas({
 
     const containerX = Math.min(Math.max(info.point.x - rect.left, 0), rect.width);
     const containerY = Math.min(Math.max(info.point.y - rect.top, 0), rect.height);
-    const normalizedX = containerX / rect.width;
-    const normalizedY = containerY / rect.height;
+    // Use CANVAS_SIZE for normalization since coordinates are stored relative to 640px
+    const normalizedX = containerX / CANVAS_SIZE;
+    const normalizedY = containerY / CANVAS_SIZE;
 
-    const offsetX = containerX - rect.width / 2;
-    const offsetY = containerY - rect.height / 2;
+    // For angle/distance calculation, use actual container size
+    const actualSize = Math.min(rect.width, rect.height, CANVAS_SIZE);
+    const offsetX = containerX - actualSize / 2;
+    const offsetY = containerY - actualSize / 2;
 
     const angle = Math.atan2(offsetY, offsetX);
     const ring = RING_CONFIG[bubble.type].radius;
@@ -194,8 +232,12 @@ export function CircleCanvas({
   return (
     <div
       ref={containerRef}
-      className="relative flex h-[640px] w-[640px] max-h-[90vh] max-w-[90vw] items-center justify-center overflow-visible bg-transparent origin-center"
+      className="relative flex items-center justify-center overflow-visible bg-transparent origin-center touch-manipulation aspect-square"
       style={{ 
+        width: 'min(95vw, 640px)',
+        height: 'min(85vh, 640px)',
+        minWidth: '280px',
+        minHeight: '280px',
         cursor: isPanningRef.current ? "grabbing" : "grab",
         touchAction: "pan-x pan-y pinch-zoom",
         transform: `scale(${canvasZoom})`,
@@ -261,8 +303,10 @@ export function CircleCanvas({
                 x: (Math.cos(position.angle) * position.ring + CANVAS_SIZE / 2) / CANVAS_SIZE,
                 y: (Math.sin(position.angle) * position.ring + CANVAS_SIZE / 2) / CANVAS_SIZE,
               };
-        const targetX = normalized.x * CANVAS_SIZE;
-        const targetY = normalized.y * CANVAS_SIZE;
+        // Normalized coordinates are always based on CANVAS_SIZE (0-1 range)
+        // Multiply by actual container size to get pixel position in the rendered canvas
+        const targetX = normalized.x * containerSize;
+        const targetY = normalized.y * containerSize;
 
         const fillStyle = (() => {
           switch (bubble.type) {
@@ -436,30 +480,39 @@ function RadialGrid() {
   const rings = [52, 86, 128, 180, 240];
   return (
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-      <div className="relative h-[560px] w-[560px]">
-        {rings.map((radius, index) => (
-          <div
-            key={radius}
-            className="absolute left-1/2 top-1/2 rounded-full border border-dashed"
-            style={{
-              width: radius * 2,
-              height: radius * 2,
-              transform: "translate(-50%, -50%)",
-              opacity: 0.45 - index * 0.05,
-              borderColor: "var(--border)",
-            }}
-          />
-        ))}
+      <div className="relative w-full h-full" style={{ aspectRatio: '1' }}>
+        {rings.map((radius, index) => {
+          // Convert radius to percentage of CANVAS_SIZE, which will scale with container
+          const radiusPercent = (radius / CANVAS_SIZE) * 100;
+          return (
+            <div
+              key={radius}
+              className="absolute left-1/2 top-1/2 rounded-full border border-dashed"
+              style={{
+                width: `${radiusPercent * 2}%`,
+                height: `${radiusPercent * 2}%`,
+                transform: "translate(-50%, -50%)",
+                opacity: 0.45 - index * 0.05,
+                borderColor: "var(--border)",
+              }}
+            />
+          );
+        })}
       </div>
     </div>
   );
 }
 
 function CenterHub() {
+  // Center hub is 176px on 640px canvas = 27.5% of canvas
   return (
     <div
-      className="pointer-events-none absolute left-1/2 top-1/2 flex h-44 w-44 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-[0_25px_45px_-30px_rgba(0,0,0,0.25)]"
+      className="pointer-events-none absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-white shadow-[0_25px_45px_-30px_rgba(0,0,0,0.25)]"
       style={{
+        width: '27.5%',
+        height: '27.5%',
+        minWidth: '77px',
+        minHeight: '77px',
         border: "3px solid #0EA8A8",
       }}
     >

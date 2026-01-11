@@ -350,7 +350,7 @@ function ensureBubbleDefaults(bubbles: Record<string, Bubble>): Record<string, B
     } else if (task.lifeAreaId) {
       if (!taskGroupsByLifeArea.has(task.lifeAreaId)) {
         taskGroupsByLifeArea.set(task.lifeAreaId, []);
-      }
+    }
       taskGroupsByLifeArea.get(task.lifeAreaId)!.push(task);
     }
   });
@@ -434,7 +434,7 @@ export const useBubbleStore = create<BubbleState>()(
       pinnedBubbleId: null,
       localPositions: {},
       currentUserId: null,
-      canvasZoom: 1.0,
+      canvasZoom: 0.75,
       hydrateFromServer: ({ lifeAreas, workstreams, items }) => {
         const state = get();
         const localPositions = state.localPositions;
@@ -630,7 +630,7 @@ export const useBubbleStore = create<BubbleState>()(
             pinnedBubbleId: null,
             zoomLevel: "day",
             selectedDate: today,
-            canvasZoom: 1.0,
+            canvasZoom: 0.75,
           };
         }),
       reset: () =>
@@ -641,7 +641,7 @@ export const useBubbleStore = create<BubbleState>()(
           pinnedBubbleId: null,
           localPositions: {},
           currentUserId: null,
-          canvasZoom: 1.0,
+          canvasZoom: 0.75,
         }),
     }),
     {
