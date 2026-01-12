@@ -239,21 +239,43 @@ function spreadCluster(
     return a.title.localeCompare(b.title);
   });
   if (sorted.length === 1) {
-    sorted[0].bubblePosition = { ring: radius, angle: centreAngle };
+    const normalized = polarToNormalized(radius, centreAngle);
+    sorted[0].bubblePosition = { ring: radius, angle: centreAngle, x: normalized.x, y: normalized.y };
     sorted[0].bubbleSize = baseSize;
     return;
   }
 
-  // Increase spacing - use larger multiplier for better spread
-  const desiredWidth = Math.max(0.6, sorted.length * 0.85);
-  let totalWidth = Math.min(wedge, desiredWidth);
-  if (wedge > Math.PI && desiredWidth < wedge * 0.9) {
-    totalWidth = wedge;
+  // Calculate spacing based on bubble size and radius
+  // Use angular spacing that accounts for bubble size to prevent overlap
+  // Use a very aggressive spacing multiplier to ensure no overlap
+  const bubbleRadiusInPixels = baseSize / 2;
+  // Increase spacing multiplier to 5x for much better separation and no overlap
+  const minAngleSpacing = Math.atan2(bubbleRadiusInPixels * 5, radius);
+  
+  // For many bubbles, expand the wedge to accommodate them
+  const maxWedge = wedge > Math.PI ? TWO_PI - 0.2 : wedge;
+  const estimatedWidth = sorted.length * minAngleSpacing;
+  let totalWidth = Math.min(maxWedge, Math.max(wedge, estimatedWidth));
+  
+  // Cap total width at full circle (minus small margin) for unassigned items
+  if (wedge > Math.PI) {
+    totalWidth = Math.min(TWO_PI - 0.2, totalWidth);
   }
-  // Add minimum spacing between bubbles
-  const minSpacing = 0.2; // Increased minimum angle between bubbles for better spacing
+  
+  // Calculate step that ensures minimum spacing - prioritize spacing over fitting in wedge
   const calculatedStep = totalWidth / Math.max(1, sorted.length - 1);
-  const step = Math.max(calculatedStep, minSpacing);
+  const step = Math.max(calculatedStep, minAngleSpacing);
+  
+  // If step is larger than calculated, expand total width to accommodate
+  if (step > calculatedStep && wedge <= Math.PI) {
+    totalWidth = step * Math.max(1, sorted.length - 1);
+    // Cap at maxWedge but allow expansion up to 2*Math.PI for large groups
+    if (totalWidth > maxWedge && totalWidth < TWO_PI - 0.2) {
+      // Allow expansion for groups that need it
+    }
+  }
+  
+  // Adjust total width to be an exact multiple of step
   const adjustedWidth = step * Math.max(1, sorted.length - 1);
   const start = centreAngle - adjustedWidth / 2;
 
@@ -325,7 +347,9 @@ function ensureBubbleDefaults(bubbles: Record<string, Bubble>): Record<string, B
       (bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null),
     );
     // Projects/Processes on outer edge of life area - spread around the life area angle
-    spreadCluster(adjustableProjects, angle, RING_CONFIG.project.radius, RING_CONFIG.project.baseSize, Math.PI / 6);
+    // Use larger wedge for projects to prevent overlap
+    const projectWedge = projects.length > 5 ? Math.PI / 4 : Math.PI / 6;
+    spreadCluster(adjustableProjects, angle, RING_CONFIG.project.radius, RING_CONFIG.project.baseSize, projectWedge);
   });
 
   // Then, position Tasks and Ideas flowing outward from their parent Projects/Processes
@@ -361,15 +385,24 @@ function ensureBubbleDefaults(bubbles: Record<string, Bubble>): Record<string, B
     if (!project) return;
     const projectAngle = project.bubblePosition?.angle ?? 0;
     const adjustableTasks = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-    // Tasks flow outward in a line from the project
-    spreadCluster(adjustableTasks, projectAngle, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, Math.PI / 8);
+    // Tasks flow outward in a line from the project - expand wedge more aggressively
+    let wedge = Math.PI / 8; // Default
+    if (group.length > 12) wedge = Math.PI / 3; // Large groups get more space
+    else if (group.length > 8) wedge = Math.PI / 4;
+    else if (group.length > 4) wedge = Math.PI / 6;
+    spreadCluster(adjustableTasks, projectAngle, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, wedge);
   });
 
   // Position tasks without projects by life area
   taskGroupsByLifeArea.forEach((group, lifeAreaId) => {
     const lifeAreaAngle = lifeAreaAngles.get(lifeAreaId) ?? 0;
     const adjustableTasks = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-    spreadCluster(adjustableTasks, lifeAreaAngle, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, Math.PI / 7);
+    // Expand wedge more aggressively for many tasks - use larger wedges
+    let wedge = Math.PI / 6; // Default smaller wedge
+    if (group.length > 15) wedge = Math.PI / 2; // Half circle for 15+
+    else if (group.length > 10) wedge = Math.PI / 3; // Third circle for 10-15
+    else if (group.length > 5) wedge = Math.PI / 4; // Quarter circle for 5-10
+    spreadCluster(adjustableTasks, lifeAreaAngle, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, wedge);
   });
 
   // Group ideas by their parent project/process
@@ -397,15 +430,24 @@ function ensureBubbleDefaults(bubbles: Record<string, Bubble>): Record<string, B
     if (!project) return;
     const projectAngle = project.bubblePosition?.angle ?? 0;
     const adjustableIdeas = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-    // Ideas flow most outward in a line from the project
-    spreadCluster(adjustableIdeas, projectAngle, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, Math.PI / 8);
+    // Ideas flow most outward in a line from the project - expand wedge more aggressively
+    let wedge = Math.PI / 8; // Default
+    if (group.length > 12) wedge = Math.PI / 3; // Large groups get more space
+    else if (group.length > 8) wedge = Math.PI / 4;
+    else if (group.length > 4) wedge = Math.PI / 6;
+    spreadCluster(adjustableIdeas, projectAngle, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, wedge);
   });
 
   // Position ideas without projects by life area
   ideaGroupsByLifeArea.forEach((group, lifeAreaId) => {
     const lifeAreaAngle = lifeAreaAngles.get(lifeAreaId) ?? 0;
     const adjustableIdeas = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-    spreadCluster(adjustableIdeas, lifeAreaAngle, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, Math.PI / 7);
+    // Expand wedge more aggressively for many ideas
+    let wedge = Math.PI / 6; // Default smaller wedge
+    if (group.length > 15) wedge = Math.PI / 2; // Half circle for 15+
+    else if (group.length > 10) wedge = Math.PI / 3; // Third circle for 10-15
+    else if (group.length > 5) wedge = Math.PI / 4; // Quarter circle for 5-10
+    spreadCluster(adjustableIdeas, lifeAreaAngle, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, wedge);
   });
 
   // Handle unassigned ideas (no life area)

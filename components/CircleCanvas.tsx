@@ -52,8 +52,6 @@ export function CircleCanvas({
   onBubbleDrop,
 }: CircleCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const canvasPanRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const isPanningRef = useRef(false);
   const pinchZoomRef = useRef<{ distance: number; centerX: number; centerY: number } | null>(null);
   const [containerSize, setContainerSize] = useState(CANVAS_SIZE);
   const bubbles = useBubbleStore((state) => state.bubbles);
@@ -107,42 +105,6 @@ export function CircleCanvas({
     });
   }, [bubbles]);
   
-  // Handle canvas panning (drag empty space)
-  const handleCanvasMouseDown = (e: React.MouseEvent) => {
-    // Only start panning if clicking on empty space (not on a bubble)
-    const target = e.target as HTMLElement;
-    const isBubble = target.closest('[data-bubble-id]');
-    const isBackdrop = target.classList.contains("canvas-backdrop") || target === e.currentTarget;
-    
-    if (!isBubble && isBackdrop) {
-      e.preventDefault();
-      isPanningRef.current = true;
-      canvasPanRef.current = { x: e.clientX, y: e.clientY };
-    }
-  };
-
-  const handleCanvasMouseMove = (e: React.MouseEvent) => {
-    if (!isPanningRef.current || !containerRef.current) return;
-    
-    e.preventDefault();
-    const deltaX = e.clientX - canvasPanRef.current.x;
-    const deltaY = e.clientY - canvasPanRef.current.y;
-    
-    // Update pan position
-    const container = containerRef.current;
-    const currentTransform = container.style.transform || "translate(0px, 0px)";
-    const match = currentTransform.match(/translate\(([^,]+)px,\s*([^)]+)\)px/);
-    const currentX = match ? parseFloat(match[1]) || 0 : 0;
-    const currentY = match ? parseFloat(match[2]) || 0 : 0;
-    
-    container.style.transform = `translate(${currentX + deltaX}px, ${currentY + deltaY}px)`;
-    canvasPanRef.current = { x: e.clientX, y: e.clientY };
-  };
-
-  const handleCanvasMouseUp = () => {
-    isPanningRef.current = false;
-  };
-
   // Handle mouse wheel zoom
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
@@ -238,54 +200,28 @@ export function CircleCanvas({
         height: 'min(85vh, 640px)',
         minWidth: '280px',
         minHeight: '280px',
-        cursor: isPanningRef.current ? "grabbing" : "grab",
         touchAction: "pan-x pan-y pinch-zoom",
         transform: `scale(${canvasZoom})`,
         transformOrigin: "center center",
+        willChange: "transform",
       }}
-      onWheel={handleWheel}
-      onMouseDown={handleCanvasMouseDown}
-      onMouseMove={handleCanvasMouseMove}
-      onMouseUp={handleCanvasMouseUp}
-      onMouseLeave={handleCanvasMouseUp}
+      onWheel={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleWheel(e);
+      }}
       onTouchStart={(e) => {
         if (e.touches.length === 2) {
           handleTouchStart(e);
-        } else {
-          const target = e.target as HTMLElement;
-          const isBubble = target.closest('[data-bubble-id]');
-          if (!isBubble) {
-            const touch = e.touches[0];
-            isPanningRef.current = true;
-            canvasPanRef.current = { x: touch.clientX, y: touch.clientY };
-          }
         }
       }}
       onTouchMove={(e) => {
         if (e.touches.length === 2) {
+          e.preventDefault();
           handleTouchMove(e);
-        } else if (isPanningRef.current && containerRef.current && e.touches.length === 1) {
-          const touch = e.touches[0];
-          const deltaX = touch.clientX - canvasPanRef.current.x;
-          const deltaY = touch.clientY - canvasPanRef.current.y;
-          
-          const container = containerRef.current;
-          // Extract translate values from transform, ignoring scale
-          const currentTransform = container.style.transform || `translate(0px, 0px) scale(${canvasZoom})`;
-          const translateMatch = currentTransform.match(/translate\(([^,]+)px,\s*([^)]+)\)px/);
-          const currentX = translateMatch ? parseFloat(translateMatch[1]) || 0 : 0;
-          const currentY = translateMatch ? parseFloat(translateMatch[2]) || 0 : 0;
-          
-          container.style.transform = `translate(${currentX + deltaX}px, ${currentY + deltaY}px) scale(${canvasZoom})`;
-          canvasPanRef.current = { x: touch.clientX, y: touch.clientY };
         }
       }}
-      onTouchEnd={(e) => {
-        handleTouchEnd();
-        if (e.touches.length === 0) {
-          isPanningRef.current = false;
-        }
-      }}
+      onTouchEnd={handleTouchEnd}
     >
       <Backdrop />
       <RadialGrid />
@@ -322,14 +258,14 @@ export function CircleCanvas({
             case "process":
               return "#FF8F5A";
             case "task": {
-              // Task status colors: To-do (orange), In progress (blue), Done (green)
-              if (bubble.status === "done") return "#0EA8A8"; // teal (brand color for done)
-              if (bubble.status === "in_progress") return "#3b82f6"; // blue
-              // pending/default - warm orange
-              return "#F4B13E"; // warm orange (matches brand palette)
+              // Task status colors: Softer, more professional palette
+              if (bubble.status === "done") return "#28B7A3"; // mint green for done
+              if (bubble.status === "in_progress") return "#5B9BD5"; // soft blue for in progress
+              // pending/default - soft purple
+              return "#9B8CF5"; // soft purple for pending tasks
             }
             case "idea":
-              return "#A8B0B8"; // softer grey
+              return "#B8C5D0"; // soft blue-grey for ideas
             default:
               return "#8F8CF5";
           }
@@ -477,7 +413,14 @@ function Crosshair() {
 }
 
 function RadialGrid() {
-  const rings = [52, 86, 128, 180, 240];
+  // Match the actual ring positions from RING_CONFIG
+  // life_area: 260, project: 285, task: 320, idea: 360
+  const rings = [
+    RING_CONFIG.life_area.radius,  // 260
+    RING_CONFIG.project.radius,    // 285
+    RING_CONFIG.task.radius,       // 320
+    RING_CONFIG.idea.radius,       // 360
+  ];
   return (
     <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
       <div className="relative w-full h-full" style={{ aspectRatio: '1' }}>
@@ -492,7 +435,7 @@ function RadialGrid() {
                 width: `${radiusPercent * 2}%`,
                 height: `${radiusPercent * 2}%`,
                 transform: "translate(-50%, -50%)",
-                opacity: 0.45 - index * 0.05,
+                opacity: 0.35 - index * 0.06,
                 borderColor: "var(--border)",
               }}
             />
