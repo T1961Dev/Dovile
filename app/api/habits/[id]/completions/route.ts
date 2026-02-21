@@ -7,13 +7,11 @@ const toggleSchema = z.object({
   date: z.string(),
 });
 
-type RouteParams = {
-  params: {
-    id: string;
-  };
-};
-
-export async function POST(request: NextRequest, { params }: RouteParams) {
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },
@@ -27,7 +25,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   const { data: habit } = await (supabase
     .from("habits")
     .select("id") as any)
-    .eq("id", params.id)
+    .eq("id", id)
     .eq("user_id", user.id)
     .single();
 
@@ -46,7 +44,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
   const { data: existing } = await (supabase
     .from("habit_completions")
     .select("id") as any)
-    .eq("habit_id", params.id)
+    .eq("habit_id", id)
     .eq("completed_at", payload.data.date)
     .maybeSingle();
 
@@ -59,7 +57,7 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
     const { data, error } = await (supabase
       .from("habit_completions") as any)
       .insert({
-        habit_id: params.id,
+        habit_id: id,
         completed_at: payload.data.date,
       })
       .select("*")

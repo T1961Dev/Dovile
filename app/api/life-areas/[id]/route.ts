@@ -9,13 +9,11 @@ const updateSchema = z.object({
   name: z.string().optional(),
 });
 
-type RouteParams = {
-  params: {
-    id: string;
-  };
-};
-
-export async function PATCH(request: Request, { params }: RouteParams) {
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },
@@ -40,7 +38,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   const { data, error } = await (supabase
     .from("life_areas") as any)
     .update(updates)
-    .eq("id", params.id)
+    .eq("id", id)
     .eq("user_id", user.id)
     .select("*")
     .single();

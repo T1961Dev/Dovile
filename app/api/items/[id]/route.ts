@@ -7,13 +7,11 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-type RouteParams = {
-  params: {
-    id: string;
-  };
-};
-
-export async function GET(request: Request, { params }: RouteParams) {
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },
@@ -26,12 +24,12 @@ export async function GET(request: Request, { params }: RouteParams) {
   const { data, error } = await (supabase
     .from("items")
     .select("*") as any)
-    .eq("id", params.id)
+    .eq("id", id)
     .eq("user_id", user.id)
     .single();
 
   if (error || !data) {
-    console.error("Failed to fetch item:", { id: params.id, error: error?.message, user_id: user.id });
+    console.error("Failed to fetch item:", { id, error: error?.message, user_id: user.id });
     return NextResponse.json({ error: error?.message ?? "Item not found" }, { status: 404 });
   }
 
@@ -47,7 +45,11 @@ const updateItemSchema = z.object({
   workstreamId: z.string().optional().nullable(),
 });
 
-export async function PATCH(request: Request, { params }: RouteParams) {
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
   const supabase = await createServerSupabaseClient();
   const {
     data: { user },
@@ -83,14 +85,14 @@ export async function PATCH(request: Request, { params }: RouteParams) {
         .eq("user_id", user.id)
         .eq("type", "task")
         .eq("status", "in_progress")
-        .neq("id", params.id);
+        .neq("id", id);
     }
   }
 
   const { data, error } = await (supabase
     .from("items") as any)
     .update(updates)
-    .eq("id", params.id)
+    .eq("id", id)
     .eq("user_id", user.id)
     .select("*")
     .single();
@@ -102,7 +104,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   if (payload.data.status === "done") {
     const xpEvent = await (supabase.from("xp_events") as any).insert({
       user_id: user.id,
-      item_id: params.id,
+      item_id: id,
       kind: "task_complete",
       amount: DEFAULT_XP_PER_TASK,
       meta: {
