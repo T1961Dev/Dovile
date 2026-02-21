@@ -105,6 +105,7 @@ export async function classifyCaptureAction(rawInput: unknown): Promise<Classify
   const classification = await classifyUtterance(parsed.data.text, {
     model: coachConfig.data?.model ?? undefined,
     dailyCapacity: parsed.data.dailyCapacity ?? DEFAULT_DAILY_CAPACITY,
+    lifeAreas: areas.map((a: LifeAreaRow) => a.name),
     workstreams: workstreamsWithContext,
   });
 

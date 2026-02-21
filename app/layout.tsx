@@ -1,23 +1,19 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Rethink_Sans } from "next/font/google";
 import { Toaster } from "sonner";
 
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const rethinkSans = Rethink_Sans({
+  variable: "--font-rethink-sans",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
 });
 
 export const metadata: Metadata = {
-  title: "LifeWheel",
+  title: "The O Space",
   description:
-    "LifeWheel helps you plan your life with circles, streaks, and a gentle AI coach.",
+    "The O Space helps you plan your life with circles, streaks, and a gentle AI coach.",
 };
 
 export const viewport: Viewport = {
@@ -34,7 +30,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+      <body className={`${rethinkSans.variable} antialiased`}>
         {children}
         <Toaster richColors position="bottom-center" />
       </body>

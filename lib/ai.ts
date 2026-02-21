@@ -15,18 +15,19 @@ export async function classifyUtterance(
     model?: string; 
     dailyCapacity?: number; 
     availableHours?: number;
+    lifeAreas?: string[];
     workstreams?: Array<{ title: string; description: string | null; lifeArea: string; taskExamples?: string[] }>;
   },
 ) {
   const model = options?.model ?? defaultModel();
   const dailyCapacity = options?.dailyCapacity ?? DEFAULT_DAILY_CAPACITY;
   const availableHours = options?.availableHours;
+  const lifeAreaNames = options?.lifeAreas?.length ? options.lifeAreas : DEFAULT_LIFE_AREAS;
 
   const capacityContext = availableHours
     ? `The user has ${availableHours} hours available today after accounting for calendar events and routine blocks (sleep, food, etc.). Only suggest tasks that can realistically fit in this time.`
     : `The user's daily capacity is ${dailyCapacity} tasks.`;
 
-  // Build workstream context for learning
   let workstreamContext = "";
   if (options?.workstreams && options.workstreams.length > 0) {
     workstreamContext = `\n\nEXISTING PROJECTS/PROCESSES FOR CONTEXT (learn from these to better categorize new items):\n`;
@@ -40,7 +41,7 @@ export async function classifyUtterance(
       }
       workstreamContext += `\n`;
     });
-    workstreamContext += `\nUse these projects/processes as reference. If the new item relates to any of these, suggest the project/process name in "workstream_hint".`;
+    workstreamContext += `\nUse these projects/processes as reference. If the new item relates to any of these, suggest the EXACT project/process name in "workstream_hint". If you cannot decide, leave it null.`;
   }
 
   const systemPrompt = `
@@ -50,8 +51,8 @@ Your job is to classify the user's message and automatically assign it to the co
 
 CRITICAL RULES FOR DUMP MODE:
 1. All dumped items should become IDEAS (not tasks) initially - the user will later convert them to tasks or actions as needed.
-2. Automatically assign the item to the most appropriate life area from: ${JSON.stringify(DEFAULT_LIFE_AREAS)}
-3. IMPORTANT: If you can identify a specific project or process this item belongs to (by matching it to existing projects/processes below or by understanding the context), suggest the EXACT project/process name in "workstream_hint". Learn from project descriptions and example tasks to make better matches. If you cannot decide, leave it null - the item will stay in the outer circle of the life area.
+2. Automatically assign the item to the most appropriate life area from: ${JSON.stringify(lifeAreaNames)}
+3. IMPORTANT: If you can identify a specific project or process this item belongs to (by matching it to existing projects/processes below or by understanding the context), suggest the EXACT project/process name in "workstream_hint". If you cannot decide, leave it null.
 4. If the user's wording is unclear, suggest better wording in "improved_wording" and include it in the response.
 5. If you're uncertain about the life area, set "confidence" below 0.7 and suggest the user clarify in "actions".
 
@@ -60,7 +61,7 @@ ${workstreamContext}
 
 Return JSON with:
 - "type": "idea" (always "idea" for DUMP MODE)
-- "life_area": one of ${JSON.stringify(DEFAULT_LIFE_AREAS)}
+- "life_area": one of ${JSON.stringify(lifeAreaNames)}
 - "workstream_hint": suggested project/process name if you can identify one, otherwise null
 - "confidence": number 0-1 (how confident you are about the classification)
 - "summary": short, clear title ready to add to the wheel (use improved wording if original was unclear)

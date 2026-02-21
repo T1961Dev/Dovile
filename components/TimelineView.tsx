@@ -329,7 +329,7 @@ export function TimelineView({ timezone }: TimelineViewProps) {
             aria-expanded={showTimeline}
             aria-controls="timeline-content"
             onClick={() => setShowTimeline((prev) => !prev)}
-            className="inline-flex items-center gap-1 text-sm font-semibold text-[#0EA8A8] hover:text-[#0B1918] focus:outline-none px-2 py-1 rounded-md hover:bg-[#0EA8A8]/10 transition-colors"
+            className="cursor-pointer inline-flex items-center gap-1 text-sm font-semibold text-[#0EA8A8] hover:text-[#0B1918] focus:outline-none px-2 py-1 rounded-md hover:bg-[#0EA8A8]/10 transition-colors"
           >
             {showTimeline ? (
               <>
@@ -371,7 +371,7 @@ export function TimelineView({ timezone }: TimelineViewProps) {
                   aria-expanded={showTimeAllocation}
                   aria-controls="time-allocation-panel"
                   onClick={() => setShowTimeAllocation((prev) => !prev)}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-[#0EA8A8] hover:text-[#0B1918] focus:outline-none"
+                  className="cursor-pointer inline-flex items-center gap-1 text-xs font-semibold text-[#0EA8A8] hover:text-[#0B1918] focus:outline-none"
                 >
                   {showTimeAllocation ? "Hide" : "Show"}
                   {showTimeAllocation ? (
@@ -466,7 +466,7 @@ export function TimelineView({ timezone }: TimelineViewProps) {
                   console.error("Failed to load timeline data:", error);
                 }
               }}
-              className="flex h-28 w-36 flex-shrink-0 flex-col items-start justify-between rounded-xl border border-transparent bg-white p-3 text-left shadow-sm transition hover:border-[#0EA8A8]/40 focus:outline-none"
+              className="cursor-pointer flex h-28 w-36 flex-shrink-0 flex-col items-start justify-between rounded-xl border border-transparent bg-white p-3 text-left shadow-sm transition hover:border-[#0EA8A8]/40 focus:outline-none"
             >
               <div>
                 <p className={`text-xs font-semibold ${hasItems ? "text-[#0EA8A8]" : "text-[#195552]"}`}>

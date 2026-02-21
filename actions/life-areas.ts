@@ -86,13 +86,26 @@ export async function rateLifeAreaAction(lifeAreaId: string, rating: number, not
 
   if (!user) throw new Error("Unauthorized");
 
-  const { error } = await (supabase.from("life_area_ratings") as any).insert({
+  // Insert into ratings history
+  const { error: ratingError } = await (supabase.from("life_area_ratings") as any).insert({
     life_area_id: lifeAreaId,
     rating,
     note: note ?? null,
   });
 
-  if (error) throw new Error(error.message);
+  if (ratingError) throw new Error(ratingError.message);
+
+  // Also update the life_areas.rating column so it persists on refresh
+  const { error: updateError } = await (supabase as any)
+    .from("life_areas")
+    .update({ rating })
+    .eq("id", lifeAreaId)
+    .eq("user_id", user.id);
+
+  if (updateError) {
+    console.error("Failed to update life_areas.rating:", updateError.message);
+    // Don't throw - the rating history was saved successfully
+  }
 
   revalidatePath("/app");
 }

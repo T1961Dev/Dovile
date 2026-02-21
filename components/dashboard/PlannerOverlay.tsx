@@ -7,6 +7,7 @@ import { approveVisionStepsAction } from "@/actions/visions";
 import { updateItemAction } from "@/actions/items";
 import { updateWorkstreamAction } from "@/actions/workstreams";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -15,15 +16,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useBubbleStore, RING_CONFIG } from "@/store/bubbles";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import { useBubbleStore, RING_CONFIG, CANVAS_SIZE } from "@/store/bubbles";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import type { Item, Workstream } from "@/types/entities";
 import { toast } from "sonner";
 
-const CANVAS_SIZE = 640;
 const polarToNormalized = (radius: number, angle: number) => ({
   x: (Math.cos(angle) * radius + CANVAS_SIZE / 2) / CANVAS_SIZE,
   y: (Math.sin(angle) * radius + CANVAS_SIZE / 2) / CANVAS_SIZE,
@@ -242,23 +243,22 @@ export function PlannerOverlay() {
         setOpen(next);
       }}
     >
-      <DialogContent className="flex max-h-[85vh] w-[min(90vw,720px)] flex-col overflow-hidden rounded-3xl border border-[#0EA8A8]/25 bg-[#FDFBF6] text-[#0B1918] shadow-[0_40px_65px_-35px_rgba(14,168,168,0.35)]">
-        <DialogHeader className="px-8 pt-8 text-left">
-          <DialogTitle className="text-xl font-semibold">PLANNER MODE</DialogTitle>
-          <DialogDescription className="text-xs text-[#195552]">
-            Describe your vision, goal, or plan. I'll break it down into actionable, one-sit tasks with clear Definitions of Done that you can approve and add to your circle.
+      <DialogContent className="flex max-h-[90vh] sm:max-h-[85vh] w-[calc(100vw-1rem)] sm:w-[min(90vw,720px)] flex-col overflow-hidden rounded-xl border border-border bg-background text-foreground shadow-lg">
+        <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 text-left">
+          <DialogTitle className="text-lg sm:text-xl font-bold">Planner Mode</DialogTitle>
+          <DialogDescription className="text-xs sm:text-sm text-muted-foreground">
+            Describe your vision and I&apos;ll break it down into actionable tasks you can add to your circle.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 space-y-6 overflow-y-auto px-8 pb-6 pr-10">
+        <div className="flex-1 space-y-4 overflow-y-auto px-4 sm:px-6 pb-4 sm:pb-6">
           <Input
             placeholder="Name your vision"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            className="rounded-full border-[#0EA8A8]/20 bg-white"
           />
           <Select value={timeframe} onValueChange={setTimeframe}>
-            <SelectTrigger className="rounded-full border-[#0EA8A8]/20 bg-white text-sm">
+            <SelectTrigger className="text-sm">
               <SelectValue placeholder="Timeframe" />
             </SelectTrigger>
             <SelectContent>
@@ -273,12 +273,12 @@ export function PlannerOverlay() {
             placeholder="Describe what success looks like..."
             value={description}
             onChange={(event) => setDescription(event.target.value)}
-            className="min-h-[140px] rounded-2xl border-[#0EA8A8]/20 bg-white text-sm"
+            className="min-h-[140px] text-sm"
           />
 
           <div className="flex gap-2">
             <Select value={lifeAreaId} onValueChange={setLifeAreaId}>
-              <SelectTrigger className="rounded-full border-[#0EA8A8]/20 bg-white text-sm">
+              <SelectTrigger className="text-sm">
                 <SelectValue placeholder="Attach to life area (optional)" />
               </SelectTrigger>
               <SelectContent>
@@ -293,51 +293,55 @@ export function PlannerOverlay() {
               type="date"
               value={targetDate}
               onChange={(event) => setTargetDate(event.target.value)}
-              className="rounded-full border-[#0EA8A8]/20 bg-white text-sm"
+              className="text-sm"
             />
           </div>
 
           <Button
             disabled={pending}
             onClick={handleGenerate}
-            className="w-full rounded-full bg-[#0EA8A8] text-sm font-semibold text-white hover:bg-[#0C8F90]"
+            className="w-full text-sm"
           >
             {pending ? "Thinking…" : "Generate plan"}
           </Button>
           {draftVision ? (
-            <div className="space-y-3 rounded-3xl border border-[#0EA8A8]/20 bg-white p-5 shadow-sm">
-              <h3 className="text-sm font-semibold text-[#0B1918]">Suggested actionable tasks</h3>
-              <p className="text-xs text-[#195552] mb-3">
-                Each task is designed to be completed in one focused session with a clear Definition of Done.
-              </p>
-              <div className="flex flex-col gap-2">
-                {draftVision.steps.length === 0 ? (
-                  <p className="text-xs text-[#195552]">
-                    No tasks came back. Try adding more detail to your description.
+            <>
+              <Separator />
+              <Card className="rounded-lg">
+                <CardContent className="pt-6 space-y-3">
+                  <h3 className="text-sm font-medium text-foreground">Suggested actionable tasks</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Each task is designed to be completed in one focused session with a clear Definition of Done.
                   </p>
-                ) : (
-                  draftVision.steps.map((step) => (
-                    <div
-                      key={step.id}
-                      className="rounded-2xl border border-[#0EA8A8]/10 bg-[#FDFBF6] px-3 py-2 text-sm text-[#0B1918]"
-                    >
-                      <p className="font-medium">{step.title}</p>
-                      {step.notes ? (
-                        <p className="text-xs text-[#195552] mt-1">{step.notes}</p>
-                      ) : null}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+                  <div className="flex flex-col gap-2">
+                    {draftVision.steps.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No tasks came back. Try adding more detail to your description.
+                      </p>
+                    ) : (
+                      draftVision.steps.map((step) => (
+                        <Card key={step.id} className="rounded-lg">
+                          <CardContent className="py-3 px-4 text-sm text-foreground">
+                            <p className="font-medium">{step.title}</p>
+                            {step.notes ? (
+                              <p className="text-sm text-muted-foreground mt-1">{step.notes}</p>
+                            ) : null}
+                          </CardContent>
+                        </Card>
+                      ))
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </>
           ) : null}
         </div>
 
-        <DialogFooter className="flex flex-row justify-end gap-3 px-8 pb-8 pt-4">
+        <DialogFooter className="flex flex-row justify-end gap-2 px-4 sm:px-6 pb-4 sm:pb-6 pt-3">
           <Button
             type="button"
             variant="outline"
-            className="rounded-full border-[#0EA8A8]/30 px-6 text-sm font-semibold text-[#0EA8A8] hover:border-[#0EA8A8]/60"
+            className="text-sm"
             onClick={() => {
               resetForm();
               setOpen(false);
@@ -347,9 +351,10 @@ export function PlannerOverlay() {
           </Button>
           <Button
             type="button"
+            variant="secondary"
             disabled={pending || !draftVision || draftVision.steps.length === 0}
             onClick={handleApprove}
-            className="rounded-full bg-[#FFD833] px-6 text-sm font-semibold text-[#0B1918] hover:bg-[#FECB32]"
+            className="text-sm"
           >
             Add to circle
           </Button>

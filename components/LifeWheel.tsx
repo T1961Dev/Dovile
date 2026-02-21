@@ -119,7 +119,7 @@ export function LifeWheel({
           return (
             <button
               key={category.id}
-              className={`absolute flex h-40 w-40 -translate-x-1/2 -translate-y-1/2 transform flex-col items-center justify-center rounded-full border border-[#0EA8A8]/25 bg-white/90 shadow-[0_16px_36px_-26px_rgba(14,168,168,0.18)] transition-all duration-300 hover:scale-110 ${
+              className={`cursor-pointer absolute flex h-40 w-40 -translate-x-1/2 -translate-y-1/2 transform flex-col items-center justify-center rounded-full border border-[#0EA8A8]/25 bg-white/90 shadow-[0_16px_36px_-26px_rgba(14,168,168,0.18)] transition-all duration-300 hover:scale-110 ${
                 isSelected ? "scale-110 shadow-[0_20px_44px_-22px_rgba(14,168,168,0.25)]" : ""
               }`}
               style={{

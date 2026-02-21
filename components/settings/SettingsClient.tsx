@@ -196,7 +196,7 @@ export function SettingsClient({
                       key={i}
                       type="button"
                       onClick={() => setCapacity(i + 1)}
-                      className={`h-8 rounded transition-all ${
+                      className={`cursor-pointer h-8 rounded transition-all ${
                         isActive
                           ? 'bg-slate-900 hover:bg-slate-800'
                           : 'bg-slate-200 hover:bg-slate-300'

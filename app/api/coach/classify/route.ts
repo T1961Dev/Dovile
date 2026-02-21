@@ -49,13 +49,14 @@ export async function POST(request: Request) {
     .eq("user_id", user.id)
     .maybeSingle();
 
+  type LifeAreaRow = Database["public"]["Tables"]["life_areas"]["Row"];
+  const areasTyped = (areas ?? []) as LifeAreaRow[];
+
   const classification = await classifyUtterance(payload.data.message, {
     model: coachConfig.data?.model ?? undefined,
     dailyCapacity: payload.data.dailyCapacity ?? DEFAULT_DAILY_CAPACITY,
+    lifeAreas: areasTyped.map((a: LifeAreaRow) => a.name),
   });
-
-  type LifeAreaRow = Database["public"]["Tables"]["life_areas"]["Row"];
-  const areasTyped = (areas ?? []) as LifeAreaRow[];
   const targetArea =
     areasTyped.find(
       (area: LifeAreaRow) => area.name.toLowerCase() === String(classification.life_area ?? "").toLowerCase(),

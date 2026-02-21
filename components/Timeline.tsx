@@ -76,7 +76,7 @@ export function Timeline({ selectedDate, timezone, mode }: TimelineProps) {
             <button
               key={item.value}
               onClick={() => handleModeChange(item.value)}
-              className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
+              className={`cursor-pointer rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
                 item.value === mode
                   ? "bg-white text-[#0EA8A8] shadow-[0_8px_20px_-10px_rgba(14,168,168,0.6)]"
                   : "text-[#0EA8A8]/60 hover:text-[#0EA8A8]"
@@ -98,7 +98,7 @@ export function Timeline({ selectedDate, timezone, mode }: TimelineProps) {
             <button
               key={day.date}
               onClick={() => handleSelectDay(day.date)}
-              className={`flex min-w-[80px] flex-col items-center gap-1 rounded-3xl border px-4 py-3 text-xs transition ${
+              className={`cursor-pointer flex min-w-[80px] flex-col items-center gap-1 rounded-3xl border px-4 py-3 text-xs transition ${
                 isSelected
                   ? "border-transparent bg-[#0EA8A8] text-white shadow-[0_18px_30px_-20px_rgba(14,168,168,0.9)] hover:bg-[#0C8F90]"
                   : "border-white/80 bg-white/80 text-slate-600 shadow-[0_10px_25px_-22px_rgba(99,102,241,0.45)] hover:border-[#0EA8A8]/20 hover:text-[#0EA8A8]"

@@ -11,25 +11,22 @@ type ItemRow = Database["public"]["Tables"]["items"]["Row"];
 type WorkstreamRow = Database["public"]["Tables"]["workstreams"]["Row"];
 type LifeAreaRow = Database["public"]["Tables"]["life_areas"]["Row"];
 
-export const RING_CONFIG: Record<
-  BubbleType,
-  {
-    radius: number;
-    baseSize: number;
-  }
-> = {
-  life_area: { radius: 260, baseSize: 110 },
-  // Projects/Processes on outer edge of life area
-  project: { radius: 285, baseSize: 46 },
-  process: { radius: 285, baseSize: 46 },
-  // Tasks flow outward from projects (actionable area, more inner than ideas)
-  task: { radius: 320, baseSize: 30 },
-  // Ideas flow most outward from projects (non-actionable area)
-  idea: { radius: 360, baseSize: 26 },
-  vision: { radius: 320, baseSize: 56 },
+// ─── Layout geometry ───────────────────────────────────────────
+// Canvas is 900×900 logical pixels. Center = 450,450.
+// This gives plenty of room for 8+ life areas with projects/tasks/ideas.
+export const CANVAS_SIZE = 900;
+
+export const RING_CONFIG: Record<BubbleType, { radius: number; baseSize: number }> = {
+  life_area: { radius: 220, baseSize: 100 },  // Large circles on inner ring
+  project:   { radius: 320, baseSize: 40 },   // Medium circles, well separated from life areas
+  process:   { radius: 320, baseSize: 40 },
+  task:      { radius: 390, baseSize: 24 },   // Small dots
+  idea:      { radius: 430, baseSize: 18 },   // Smallest dots on outer edge
+  vision:    { radius: 390, baseSize: 44 },
 };
 
-const CANVAS_SIZE = 640;
+// Schema version - bump this whenever RING_CONFIG changes to force re-layout
+const LAYOUT_VERSION = 5;
 
 const DEFAULT_METADATA: Record<BubbleType, Record<string, unknown>> = {
   life_area: {},
@@ -42,25 +39,18 @@ const DEFAULT_METADATA: Record<BubbleType, Record<string, unknown>> = {
 
 function polarToNormalized(radius: number, angle: number) {
   const center = CANVAS_SIZE / 2;
-  const xPx = Math.cos(angle) * radius + center;
-  const yPx = Math.sin(angle) * radius + center;
   return {
-    x: xPx / CANVAS_SIZE,
-    y: yPx / CANVAS_SIZE,
+    x: (Math.cos(angle) * radius + center) / CANVAS_SIZE,
+    y: (Math.sin(angle) * radius + center) / CANVAS_SIZE,
   };
 }
 
 function normalizedToPolar(x?: number, y?: number) {
-  if (typeof x !== "number" || typeof y !== "number") {
-    return null;
-  }
+  if (typeof x !== "number" || typeof y !== "number") return null;
   const center = CANVAS_SIZE / 2;
   const xPx = x * CANVAS_SIZE - center;
   const yPx = y * CANVAS_SIZE - center;
-  return {
-    ring: Math.sqrt(xPx * xPx + yPx * yPx),
-    angle: Math.atan2(yPx, xPx),
-  };
+  return { ring: Math.sqrt(xPx * xPx + yPx * yPx), angle: Math.atan2(yPx, xPx) };
 }
 
 export interface Bubble {
@@ -82,12 +72,9 @@ interface BubbleState {
   pinnedBubbleId: string | null;
   localPositions: Record<string, { ring: number; angle: number; x: number; y: number }>;
   currentUserId: string | null;
-  canvasZoom: number; // Zoom level for circle canvas (1.0 = 100%, 0.5 = 50%, 2.0 = 200%)
-  hydrateFromServer: (payload: {
-    lifeAreas: LifeAreaRow[];
-    workstreams: WorkstreamRow[];
-    items: ItemRow[];
-  }) => void;
+  canvasZoom: number;
+  layoutVersion: number;
+  hydrateFromServer: (payload: { lifeAreas: LifeAreaRow[]; workstreams: WorkstreamRow[]; items: ItemRow[] }) => void;
   upsertBubble: (bubble: Bubble) => void;
   removeBubble: (id: string) => void;
   setZoomLevel: (zoom: BubbleState["zoomLevel"]) => void;
@@ -95,131 +82,89 @@ interface BubbleState {
   setPinnedBubble: (id: string | null) => void;
   setCanvasZoom: (zoom: number) => void;
   updateBubblePosition: (id: string, position: { ring: number; angle: number; x?: number; y?: number }) => void;
-  getNextAngle: (
-    type: BubbleType,
-    options?: { lifeAreaId?: string; parentId?: string; anchorAngle?: number; wedge?: number },
-  ) => number;
+  getNextAngle: (type: BubbleType, options?: { lifeAreaId?: string; parentId?: string; anchorAngle?: number; wedge?: number }) => number;
   forgetLocalPosition: (id: string) => void;
   syncUserContext: (userId: string) => void;
   reset: () => void;
 }
 
-function rowToBubble(row: LifeAreaRow | WorkstreamRow | ItemRow): Bubble {
+// ─── Row → Bubble converters ──────────────────────────────────
+function rowToBubble(row: LifeAreaRow | WorkstreamRow | ItemRow, forceRelayout: boolean): Bubble {
+  // Item (task / idea)
   if ("life_area_id" in row && "user_id" in row && "type" in row && "status" in row) {
-    // item
     const type = row.type === "task" ? "task" : "idea";
-    const storedPosition = (row.bubble_position as { ring?: number; angle?: number; x?: number; y?: number } | null) ?? null;
-    let ring = typeof storedPosition?.ring === "number" ? storedPosition.ring : RING_CONFIG[type].radius;
-    let angle = typeof storedPosition?.angle === "number" ? storedPosition.angle : 0;
-    const derived = normalizedToPolar(storedPosition?.x, storedPosition?.y);
-    if (derived) {
-      ring = derived.ring;
-      angle = derived.angle;
+    const config = RING_CONFIG[type];
+    // If we're forcing re-layout, ignore stored positions
+    const storedPos = forceRelayout ? null : (row.bubble_position as { ring?: number; angle?: number; x?: number; y?: number } | null) ?? null;
+    let ring = config.radius;
+    let angle = 0;
+    if (storedPos) {
+      ring = typeof storedPos.ring === "number" ? storedPos.ring : config.radius;
+      angle = typeof storedPos.angle === "number" ? storedPos.angle : 0;
+      const derived = normalizedToPolar(storedPos.x, storedPos.y);
+      if (derived) { ring = derived.ring; angle = derived.angle; }
     }
-    const normalized = storedPosition?.x != null && storedPosition?.y != null
-      ? { x: storedPosition.x, y: storedPosition.y }
+    const norm = storedPos?.x != null && storedPos?.y != null && !forceRelayout
+      ? { x: storedPos.x, y: storedPos.y }
       : polarToNormalized(ring, angle);
     return {
-      id: row.id,
-      type,
-      lifeAreaId: row.life_area_id,
-      parentId: row.workstream_id ?? undefined,
-      title: row.title,
-      status: row.status,
-      bubbleSize:
-        typeof row.bubble_size === "number" && !Number.isNaN(row.bubble_size)
-          ? Number(row.bubble_size)
-          : RING_CONFIG[type].baseSize,
-      bubblePosition: {
-        ring,
-        angle,
-        x: normalized.x,
-        y: normalized.y,
-      },
-      metadata: {
-        scheduledFor: row.scheduled_for,
-        notes: row.notes,
-        completedAt: row.completed_at,
-        __locked: Boolean(storedPosition),
-      },
+      id: row.id, type, lifeAreaId: row.life_area_id, parentId: row.workstream_id ?? undefined,
+      title: row.title, status: row.status,
+      bubbleSize: config.baseSize,
+      bubblePosition: { ring, angle, x: norm.x, y: norm.y },
+      metadata: { scheduledFor: row.scheduled_for, notes: row.notes, completedAt: row.completed_at, __locked: !forceRelayout && Boolean(storedPos) },
     };
   }
 
+  // Workstream (project / process)
   if ("life_area_id" in row && "kind" in row) {
-    const normalizedKind = row.kind === "habit" ? "process" : row.kind;
-    const projectKind = normalizedKind as "project" | "process";
-    const storedPosition = (row.bubble_position as { ring?: number; angle?: number; x?: number; y?: number } | null) ?? null;
-    let ring = typeof storedPosition?.ring === "number" ? storedPosition.ring : RING_CONFIG[projectKind].radius;
-    let angle = typeof storedPosition?.angle === "number" ? storedPosition.angle : 0;
-    const derived = normalizedToPolar(storedPosition?.x, storedPosition?.y);
-    if (derived) {
-      ring = derived.ring;
-      angle = derived.angle;
+    const kind = (row.kind === "habit" ? "process" : row.kind) as "project" | "process";
+    const config = RING_CONFIG[kind];
+    const storedPos = forceRelayout ? null : (row.bubble_position as { ring?: number; angle?: number; x?: number; y?: number } | null) ?? null;
+    let ring = config.radius;
+    let angle = 0;
+    if (storedPos) {
+      ring = typeof storedPos.ring === "number" ? storedPos.ring : config.radius;
+      angle = typeof storedPos.angle === "number" ? storedPos.angle : 0;
+      const derived = normalizedToPolar(storedPos.x, storedPos.y);
+      if (derived) { ring = derived.ring; angle = derived.angle; }
     }
-    const normalized = storedPosition?.x != null && storedPosition?.y != null
-      ? { x: storedPosition.x, y: storedPosition.y }
+    const norm = storedPos?.x != null && storedPos?.y != null && !forceRelayout
+      ? { x: storedPos.x, y: storedPos.y }
       : polarToNormalized(ring, angle);
     return {
-      id: row.id,
-      type: projectKind,
-      lifeAreaId: row.life_area_id,
-      parentId: undefined,
-      title: row.title,
-      status: row.active ? "active" : "archived",
-      bubbleSize:
-        typeof row.bubble_size === "number" && !Number.isNaN(row.bubble_size)
-          ? Number(row.bubble_size)
-          : RING_CONFIG[projectKind].baseSize,
-      bubblePosition: {
-        ring,
-        angle,
-        x: normalized.x,
-        y: normalized.y,
-      },
-      metadata: {
-        description: row.description,
-        kind: row.kind,
-        __locked: Boolean(storedPosition),
-      },
+      id: row.id, type: kind, lifeAreaId: row.life_area_id, parentId: undefined,
+      title: row.title, status: row.active ? "active" : "archived",
+      bubbleSize: config.baseSize,
+      bubblePosition: { ring, angle, x: norm.x, y: norm.y },
+      metadata: { description: row.description, kind: row.kind, __locked: !forceRelayout && Boolean(storedPos) },
     };
   }
 
-  const storedPosition = (row.bubble_position as { ring?: number; angle?: number; x?: number; y?: number } | null) ?? null;
-  let ring = typeof storedPosition?.ring === "number" ? storedPosition.ring : RING_CONFIG.life_area.radius;
-  let angle = typeof storedPosition?.angle === "number" ? storedPosition.angle : 0;
-  const derived = normalizedToPolar(storedPosition?.x, storedPosition?.y);
-  if (derived) {
-    ring = derived.ring;
-    angle = derived.angle;
+  // Life area
+  const config = RING_CONFIG.life_area;
+  const storedPos = forceRelayout ? null : (row.bubble_position as { ring?: number; angle?: number; x?: number; y?: number } | null) ?? null;
+  let ring = config.radius;
+  let angle = 0;
+  if (storedPos) {
+    ring = typeof storedPos.ring === "number" ? storedPos.ring : config.radius;
+    angle = typeof storedPos.angle === "number" ? storedPos.angle : 0;
+    const derived = normalizedToPolar(storedPos.x, storedPos.y);
+    if (derived) { ring = derived.ring; angle = derived.angle; }
   }
-  const normalized = storedPosition?.x != null && storedPosition?.y != null
-    ? { x: storedPosition.x, y: storedPosition.y }
+  const norm = storedPos?.x != null && storedPos?.y != null && !forceRelayout
+    ? { x: storedPos.x, y: storedPos.y }
     : polarToNormalized(ring, angle);
   return {
-    id: row.id,
-    type: "life_area",
-    lifeAreaId: row.id,
-    title: row.name,
-    status: "active",
-    bubbleSize:
-      typeof row.bubble_size === "number" && !Number.isNaN(row.bubble_size)
-        ? Number(row.bubble_size)
-        : RING_CONFIG.life_area.baseSize,
-    bubblePosition: {
-      ring,
-      angle,
-      x: normalized.x,
-      y: normalized.y,
-    },
-    metadata: {
-      color: row.color,
-      rating: row.rating,
-      visionText: row.vision_text,
-      __locked: Boolean(storedPosition),
-    },
+    id: row.id, type: "life_area", lifeAreaId: row.id,
+    title: row.name, status: "active",
+    bubbleSize: config.baseSize,
+    bubblePosition: { ring, angle, x: norm.x, y: norm.y },
+    metadata: { color: row.color, rating: row.rating, visionText: row.vision_text, __locked: !forceRelayout && Boolean(storedPos) },
   };
 }
 
+// ─── Spread helpers ───────────────────────────────────────────
 const TWO_PI = Math.PI * 2;
 
 function spreadCluster(
@@ -230,243 +175,143 @@ function spreadCluster(
   wedge = Math.PI / 4,
 ) {
   if (bubbles.length === 0) return;
-  const sorted = [...bubbles].sort((a, b) => {
-    const angleA = a.bubblePosition?.angle;
-    const angleB = b.bubblePosition?.angle;
-    if (typeof angleA === "number" && typeof angleB === "number") {
-      return angleA - angleB;
-    }
-    return a.title.localeCompare(b.title);
-  });
-  if (sorted.length === 1) {
-    const normalized = polarToNormalized(radius, centreAngle);
-    sorted[0].bubblePosition = { ring: radius, angle: centreAngle, x: normalized.x, y: normalized.y };
-    sorted[0].bubbleSize = baseSize;
+  if (bubbles.length === 1) {
+    const n = polarToNormalized(radius, centreAngle);
+    bubbles[0].bubblePosition = { ring: radius, angle: centreAngle, x: n.x, y: n.y };
+    bubbles[0].bubbleSize = baseSize;
     return;
   }
 
-  // Calculate spacing based on bubble size and radius
-  // Use angular spacing that accounts for bubble size to prevent overlap
-  // Use a very aggressive spacing multiplier to ensure no overlap
-  const bubbleRadiusInPixels = baseSize / 2;
-  // Increase spacing multiplier to 5x for much better separation and no overlap
-  const minAngleSpacing = Math.atan2(bubbleRadiusInPixels * 5, radius);
-  
-  // For many bubbles, expand the wedge to accommodate them
-  const maxWedge = wedge > Math.PI ? TWO_PI - 0.2 : wedge;
-  const estimatedWidth = sorted.length * minAngleSpacing;
-  let totalWidth = Math.min(maxWedge, Math.max(wedge, estimatedWidth));
-  
-  // Cap total width at full circle (minus small margin) for unassigned items
-  if (wedge > Math.PI) {
-    totalWidth = Math.min(TWO_PI - 0.2, totalWidth);
-  }
-  
-  // Calculate step that ensures minimum spacing - prioritize spacing over fitting in wedge
-  const calculatedStep = totalWidth / Math.max(1, sorted.length - 1);
-  const step = Math.max(calculatedStep, minAngleSpacing);
-  
-  // If step is larger than calculated, expand total width to accommodate
-  if (step > calculatedStep && wedge <= Math.PI) {
-    totalWidth = step * Math.max(1, sorted.length - 1);
-    // Cap at maxWedge but allow expansion up to 2*Math.PI for large groups
-    if (totalWidth > maxWedge && totalWidth < TWO_PI - 0.2) {
-      // Allow expansion for groups that need it
-    }
-  }
-  
-  // Adjust total width to be an exact multiple of step
-  const adjustedWidth = step * Math.max(1, sorted.length - 1);
-  const start = centreAngle - adjustedWidth / 2;
+  // Calculate minimum angular spacing to prevent overlap
+  // Arc distance between centers should be >= baseSize * 1.4
+  const minAngle = (baseSize * 1.4) / radius;
+  const neededWidth = (bubbles.length - 1) * minAngle;
+  // Use the larger of: requested wedge, or needed width (capped at nearly full circle)
+  const totalWidth = Math.min(TWO_PI - 0.3, Math.max(wedge, neededWidth));
+  const step = totalWidth / Math.max(1, bubbles.length - 1);
+  const start = centreAngle - totalWidth / 2;
 
-  sorted.forEach((bubble, index) => {
-    const angle = start + index * step;
-    const normalized = polarToNormalized(radius, angle);
-    bubble.bubblePosition = { ring: radius, angle, x: normalized.x, y: normalized.y };
+  const sorted = [...bubbles].sort((a, b) => {
+    const aA = a.bubblePosition?.angle;
+    const bA = b.bubblePosition?.angle;
+    if (typeof aA === "number" && typeof bA === "number") return aA - bA;
+    return a.title.localeCompare(b.title);
+  });
+
+  sorted.forEach((bubble, i) => {
+    const angle = start + i * step;
+    const n = polarToNormalized(radius, angle);
+    bubble.bubblePosition = { ring: radius, angle, x: n.x, y: n.y };
     bubble.bubbleSize = baseSize;
   });
 }
 
+// ─── Default layout ───────────────────────────────────────────
 function ensureBubbleDefaults(bubbles: Record<string, Bubble>): Record<string, Bubble> {
   const next: Record<string, Bubble> = {};
 
-  Object.values(bubbles).forEach((bubble) => {
-    const position = bubble.bubblePosition ?? {
-      ring: RING_CONFIG[bubble.type].radius,
-      angle: 0,
-    };
-    const normalized =
-      position.x != null && position.y != null
-        ? { x: position.x, y: position.y }
-        : polarToNormalized(position.ring, position.angle);
-    next[bubble.id] = {
-      ...bubble,
-      bubbleSize: bubble.bubbleSize ?? RING_CONFIG[bubble.type].baseSize,
-      bubblePosition: {
-        ring: position.ring,
-        angle: position.angle,
-        x: normalized.x,
-        y: normalized.y,
-      },
-      metadata: {
-        ...DEFAULT_METADATA[bubble.type],
-        ...bubble.metadata,
-      },
+  // 1. Copy all with defaults
+  Object.values(bubbles).forEach((b) => {
+    const pos = b.bubblePosition ?? { ring: RING_CONFIG[b.type].radius, angle: 0 };
+    const norm = pos.x != null && pos.y != null ? { x: pos.x, y: pos.y } : polarToNormalized(pos.ring, pos.angle);
+    next[b.id] = {
+      ...b,
+      bubbleSize: RING_CONFIG[b.type].baseSize, // Always use config size
+      bubblePosition: { ring: pos.ring, angle: pos.angle, x: norm.x, y: norm.y },
+      metadata: { ...DEFAULT_METADATA[b.type], ...b.metadata },
     };
   });
 
-  const lifeAreas = Object.values(next).filter((bubble) => bubble.type === "life_area");
+  // 2. Position life areas evenly around center
+  const lifeAreas = Object.values(next).filter((b) => b.type === "life_area");
   const lifeAreaAngles = new Map<string, number>();
+  const laRadius = RING_CONFIG.life_area.radius;
+  const laSize = RING_CONFIG.life_area.baseSize;
 
   if (lifeAreas.length > 0) {
-    const radius = RING_CONFIG.life_area.radius;
-    const baseSize = RING_CONFIG.life_area.baseSize;
     const step = TWO_PI / lifeAreas.length;
-    lifeAreas.forEach((bubble, index) => {
-      const key = bubble.lifeAreaId ?? bubble.id;
-      if (bubble.metadata?.__locked && bubble.bubblePosition) {
-        lifeAreaAngles.set(key, bubble.bubblePosition.angle);
+    lifeAreas.forEach((b, i) => {
+      const key = b.lifeAreaId ?? b.id;
+      if (b.metadata?.__locked && b.bubblePosition) {
+        lifeAreaAngles.set(key, b.bubblePosition.angle);
         return;
       }
-      const angle = index * step - Math.PI / 2;
-      const normalized = polarToNormalized(radius, angle);
-      bubble.bubblePosition = { ring: radius, angle, x: normalized.x, y: normalized.y };
-      bubble.bubbleSize = baseSize;
+      const angle = i * step - Math.PI / 2; // Start from top
+      const n = polarToNormalized(laRadius, angle);
+      b.bubblePosition = { ring: laRadius, angle, x: n.x, y: n.y };
+      b.bubbleSize = laSize;
       lifeAreaAngles.set(key, angle);
     });
   }
 
-  const bubbleById = new Map<string, Bubble>(Object.values(next).map((bubble) => [bubble.id, bubble]));
+  const isManual = (b: Bubble) => b.metadata?.__manualPosition && b.bubblePosition?.x != null;
 
-  // First, position Projects/Processes on outer edge of life areas
-  lifeAreaAngles.forEach((angle, lifeAreaId) => {
+  // 3. Position projects/processes on their ring, clustered near parent life area
+  lifeAreaAngles.forEach((laAngle, laId) => {
     const projects = Object.values(next).filter(
-      (bubble) => bubble.lifeAreaId === lifeAreaId && (bubble.type === "project" || bubble.type === "process"),
+      (b) => b.lifeAreaId === laId && (b.type === "project" || b.type === "process"),
     );
-    const adjustableProjects = projects.filter(
-      (bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null),
-    );
-    // Projects/Processes on outer edge of life area - spread around the life area angle
-    // Use larger wedge for projects to prevent overlap
-    const projectWedge = projects.length > 5 ? Math.PI / 4 : Math.PI / 6;
-    spreadCluster(adjustableProjects, angle, RING_CONFIG.project.radius, RING_CONFIG.project.baseSize, projectWedge);
+    const adjustable = projects.filter((b) => !isManual(b));
+    // Give each project cluster a wedge proportional to count, but at least PI/6
+    const wedge = Math.max(Math.PI / 6, projects.length * 0.15);
+    spreadCluster(adjustable, laAngle, RING_CONFIG.project.radius, RING_CONFIG.project.baseSize, wedge);
   });
 
-  // Then, position Tasks and Ideas flowing outward from their parent Projects/Processes
+  // Build project lookup
   const projectById = new Map<string, Bubble>();
-  Object.values(next).forEach((bubble) => {
-    if (bubble.type === "project" || bubble.type === "process") {
-      projectById.set(bubble.id, bubble);
-    }
+  Object.values(next).forEach((b) => {
+    if (b.type === "project" || b.type === "process") projectById.set(b.id, b);
   });
 
-  // Group tasks by their parent project/process
-  const tasks = Object.values(next).filter((bubble) => bubble.type === "task");
-  const taskGroupsByProject = new Map<string, Bubble[]>();
-  const taskGroupsByLifeArea = new Map<string, Bubble[]>();
+  // 4. Position tasks
+  const groupBy = (list: Bubble[], keyFn: (b: Bubble) => string | undefined) => {
+    const map = new Map<string, Bubble[]>();
+    list.forEach((b) => { const k = keyFn(b); if (!k) return; if (!map.has(k)) map.set(k, []); map.get(k)!.push(b); });
+    return map;
+  };
 
-  tasks.forEach((task) => {
-    if (task.parentId && projectById.has(task.parentId)) {
-      if (!taskGroupsByProject.has(task.parentId)) {
-        taskGroupsByProject.set(task.parentId, []);
-      }
-      taskGroupsByProject.get(task.parentId)!.push(task);
-    } else if (task.lifeAreaId) {
-      if (!taskGroupsByLifeArea.has(task.lifeAreaId)) {
-        taskGroupsByLifeArea.set(task.lifeAreaId, []);
-    }
-      taskGroupsByLifeArea.get(task.lifeAreaId)!.push(task);
-    }
+  const tasks = Object.values(next).filter((b) => b.type === "task");
+  const tasksByProject = groupBy(tasks.filter((t) => t.parentId && projectById.has(t.parentId!)), (b) => b.parentId);
+  const tasksByArea = groupBy(tasks.filter((t) => !t.parentId || !projectById.has(t.parentId!)), (b) => b.lifeAreaId);
+
+  tasksByProject.forEach((group, pid) => {
+    const p = projectById.get(pid);
+    if (!p) return;
+    const adj = group.filter((b) => !isManual(b));
+    spreadCluster(adj, p.bubblePosition?.angle ?? 0, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, Math.max(Math.PI / 8, group.length * 0.1));
   });
 
-  // Position tasks flowing outward from their parent project/process
-  taskGroupsByProject.forEach((group, projectId) => {
-    const project = projectById.get(projectId);
-    if (!project) return;
-    const projectAngle = project.bubblePosition?.angle ?? 0;
-    const adjustableTasks = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-    // Tasks flow outward in a line from the project - expand wedge more aggressively
-    let wedge = Math.PI / 8; // Default
-    if (group.length > 12) wedge = Math.PI / 3; // Large groups get more space
-    else if (group.length > 8) wedge = Math.PI / 4;
-    else if (group.length > 4) wedge = Math.PI / 6;
-    spreadCluster(adjustableTasks, projectAngle, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, wedge);
+  tasksByArea.forEach((group, laId) => {
+    const adj = group.filter((b) => !isManual(b));
+    spreadCluster(adj, lifeAreaAngles.get(laId) ?? 0, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, Math.max(Math.PI / 6, group.length * 0.1));
   });
 
-  // Position tasks without projects by life area
-  taskGroupsByLifeArea.forEach((group, lifeAreaId) => {
-    const lifeAreaAngle = lifeAreaAngles.get(lifeAreaId) ?? 0;
-    const adjustableTasks = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-    // Expand wedge more aggressively for many tasks - use larger wedges
-    let wedge = Math.PI / 6; // Default smaller wedge
-    if (group.length > 15) wedge = Math.PI / 2; // Half circle for 15+
-    else if (group.length > 10) wedge = Math.PI / 3; // Third circle for 10-15
-    else if (group.length > 5) wedge = Math.PI / 4; // Quarter circle for 5-10
-    spreadCluster(adjustableTasks, lifeAreaAngle, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, wedge);
+  // 5. Position ideas
+  const ideas = Object.values(next).filter((b) => b.type === "idea");
+  const ideasByProject = groupBy(ideas.filter((b) => b.parentId && projectById.has(b.parentId!)), (b) => b.parentId);
+  const ideasByArea = groupBy(ideas.filter((b) => !b.parentId || !projectById.has(b.parentId!)), (b) => b.lifeAreaId);
+
+  ideasByProject.forEach((group, pid) => {
+    const p = projectById.get(pid);
+    if (!p) return;
+    const adj = group.filter((b) => !isManual(b));
+    spreadCluster(adj, p.bubblePosition?.angle ?? 0, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, Math.max(Math.PI / 8, group.length * 0.1));
   });
 
-  // Group ideas by their parent project/process
-  const ideas = Object.values(next).filter((bubble) => bubble.type === "idea");
-  const ideaGroupsByProject = new Map<string, Bubble[]>();
-  const ideaGroupsByLifeArea = new Map<string, Bubble[]>();
-
-  ideas.forEach((idea) => {
-    if (idea.parentId && projectById.has(idea.parentId)) {
-      if (!ideaGroupsByProject.has(idea.parentId)) {
-        ideaGroupsByProject.set(idea.parentId, []);
-      }
-      ideaGroupsByProject.get(idea.parentId)!.push(idea);
-    } else if (idea.lifeAreaId) {
-      if (!ideaGroupsByLifeArea.has(idea.lifeAreaId)) {
-        ideaGroupsByLifeArea.set(idea.lifeAreaId, []);
-      }
-      ideaGroupsByLifeArea.get(idea.lifeAreaId)!.push(idea);
-    }
+  ideasByArea.forEach((group, laId) => {
+    const adj = group.filter((b) => !isManual(b));
+    spreadCluster(adj, lifeAreaAngles.get(laId) ?? 0, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, Math.max(Math.PI / 6, group.length * 0.1));
   });
 
-  // Position ideas flowing most outward from their parent project/process
-  ideaGroupsByProject.forEach((group, projectId) => {
-    const project = projectById.get(projectId);
-    if (!project) return;
-    const projectAngle = project.bubblePosition?.angle ?? 0;
-    const adjustableIdeas = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-    // Ideas flow most outward in a line from the project - expand wedge more aggressively
-    let wedge = Math.PI / 8; // Default
-    if (group.length > 12) wedge = Math.PI / 3; // Large groups get more space
-    else if (group.length > 8) wedge = Math.PI / 4;
-    else if (group.length > 4) wedge = Math.PI / 6;
-    spreadCluster(adjustableIdeas, projectAngle, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, wedge);
-  });
-
-  // Position ideas without projects by life area
-  ideaGroupsByLifeArea.forEach((group, lifeAreaId) => {
-    const lifeAreaAngle = lifeAreaAngles.get(lifeAreaId) ?? 0;
-    const adjustableIdeas = group.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-    // Expand wedge more aggressively for many ideas
-    let wedge = Math.PI / 6; // Default smaller wedge
-    if (group.length > 15) wedge = Math.PI / 2; // Half circle for 15+
-    else if (group.length > 10) wedge = Math.PI / 3; // Third circle for 10-15
-    else if (group.length > 5) wedge = Math.PI / 4; // Quarter circle for 5-10
-    spreadCluster(adjustableIdeas, lifeAreaAngle, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, wedge);
-  });
-
-  // Handle unassigned ideas (no life area)
-  const unassignedIdeas = Object.values(next).filter(
-    (bubble) => bubble.type === "idea" && !bubble.lifeAreaId,
-  );
-  const adjustableUnassignedIdeas = unassignedIdeas.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-  spreadCluster(adjustableUnassignedIdeas, -Math.PI / 2, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, TWO_PI - 0.2);
-
-  // Handle unassigned tasks (no life area, no project)
-  const unassignedTasks = Object.values(next).filter(
-    (bubble) => bubble.type === "task" && !bubble.lifeAreaId && !bubble.parentId,
-  );
-  const adjustableUnassignedTasks = unassignedTasks.filter((bubble) => !(bubble.metadata?.__manualPosition && bubble.bubblePosition?.x != null && bubble.bubblePosition?.y != null));
-  spreadCluster(adjustableUnassignedTasks, -Math.PI / 2, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, TWO_PI - 0.2);
+  // Unassigned
+  const unassigned = (type: BubbleType) => Object.values(next).filter((b) => b.type === type && !b.lifeAreaId);
+  spreadCluster(unassigned("idea").filter((b) => !isManual(b)), -Math.PI / 2, RING_CONFIG.idea.radius, RING_CONFIG.idea.baseSize, TWO_PI - 0.3);
+  spreadCluster(unassigned("task").filter((b) => !isManual(b)), -Math.PI / 2, RING_CONFIG.task.radius, RING_CONFIG.task.baseSize, TWO_PI - 0.3);
 
   return next;
 }
 
+// ─── Store ────────────────────────────────────────────────────
 export const useBubbleStore = create<BubbleState>()(
   persist(
     (set, get) => ({
@@ -476,64 +321,77 @@ export const useBubbleStore = create<BubbleState>()(
       pinnedBubbleId: null,
       localPositions: {},
       currentUserId: null,
-      canvasZoom: 0.75,
+      canvasZoom: 0.7,
+      layoutVersion: 0,
+
       hydrateFromServer: ({ lifeAreas, workstreams, items }) => {
         const state = get();
-        const localPositions = state.localPositions;
-        const existingBubbles = state.bubbles;
+        // If layout version is stale, force a fresh layout (ignore all stored positions)
+        const forceRelayout = state.layoutVersion !== LAYOUT_VERSION;
         const mapped: Record<string, Bubble> = {};
-        
-        // Preserve existing bubbles that are locked (newly created items)
-        Object.values(existingBubbles).forEach((bubble) => {
-          if (bubble.metadata?.__locked) {
-            mapped[bubble.id] = bubble;
-          }
-        });
-        
+
+        // Only preserve locked bubbles if layout version matches
+        if (!forceRelayout) {
+          Object.values(state.bubbles).forEach((b) => {
+            if (b.metadata?.__locked) mapped[b.id] = b;
+          });
+        }
+
         lifeAreas.forEach((row) => {
-          const bubble = rowToBubble(row);
-          if (!row.bubble_position && localPositions[bubble.id]) {
-            bubble.bubblePosition = localPositions[bubble.id]!;
-            bubble.metadata = {
-              ...bubble.metadata,
-              __locked: true,
-            };
+          const b = rowToBubble(row, forceRelayout);
+          if (!forceRelayout && !row.bubble_position && state.localPositions[b.id]) {
+            b.bubblePosition = state.localPositions[b.id]!;
+            b.metadata = { ...b.metadata, __locked: true };
           }
-          // Only overwrite if not already locked
-          if (!mapped[bubble.id]?.metadata?.__locked) {
-            mapped[bubble.id] = bubble;
-          }
+          if (!mapped[b.id]?.metadata?.__locked || forceRelayout) mapped[b.id] = b;
         });
         workstreams.forEach((row) => {
-          const bubble = rowToBubble(row);
-          if (!row.bubble_position && localPositions[bubble.id]) {
-            bubble.bubblePosition = localPositions[bubble.id]!;
-            bubble.metadata = {
-              ...bubble.metadata,
-              __locked: true,
-            };
+          const b = rowToBubble(row, forceRelayout);
+          if (!forceRelayout && !row.bubble_position && state.localPositions[b.id]) {
+            b.bubblePosition = state.localPositions[b.id]!;
+            b.metadata = { ...b.metadata, __locked: true };
           }
-          // Only overwrite if not already locked
-          if (!mapped[bubble.id]?.metadata?.__locked) {
-            mapped[bubble.id] = bubble;
-          }
+          if (!mapped[b.id]?.metadata?.__locked || forceRelayout) mapped[b.id] = b;
         });
         items.forEach((row) => {
-          const bubble = rowToBubble(row);
-          if (!row.bubble_position && localPositions[bubble.id]) {
-            bubble.bubblePosition = localPositions[bubble.id]!;
-            bubble.metadata = {
-              ...bubble.metadata,
-              __locked: true,
+          const b = rowToBubble(row, forceRelayout);
+          if (!forceRelayout && !row.bubble_position && state.localPositions[b.id]) {
+            b.bubblePosition = state.localPositions[b.id]!;
+            b.metadata = { ...b.metadata, __locked: true };
+          }
+          if (!mapped[b.id]?.metadata?.__locked || forceRelayout) mapped[b.id] = b;
+        });
+
+        const finalBubbles = ensureBubbleDefaults(mapped);
+
+        // Persist all computed positions to localPositions so they survive page
+        // reloads.  Without this, bubbles whose DB `bubble_position` is null
+        // would be re-laid-out from scratch on every hydration, causing the
+        // "blobs jump around on reload" bug.
+        const updatedLocalPositions: Record<string, { ring: number; angle: number; x: number; y: number }> = forceRelayout ? {} : { ...state.localPositions };
+        Object.values(finalBubbles).forEach((b) => {
+          if (b.bubblePosition?.x != null && b.bubblePosition?.y != null) {
+            updatedLocalPositions[b.id] = {
+              ring: b.bubblePosition.ring,
+              angle: b.bubblePosition.angle,
+              x: b.bubblePosition.x,
+              y: b.bubblePosition.y,
             };
           }
-          // Only overwrite if not already locked
-          if (!mapped[bubble.id]?.metadata?.__locked) {
-            mapped[bubble.id] = bubble;
+          // Lock life areas so subsequent ensureBubbleDefaults calls
+          // (from upsertBubble / removeBubble) don't reposition them
+          if (b.type === "life_area" && !b.metadata?.__locked) {
+            (b as Bubble).metadata = { ...b.metadata, __locked: true };
           }
         });
-        set({ bubbles: ensureBubbleDefaults(mapped) });
+
+        set({
+          bubbles: finalBubbles,
+          layoutVersion: LAYOUT_VERSION,
+          localPositions: updatedLocalPositions,
+        });
       },
+
       upsertBubble: (bubble) =>
         set((state) => {
           const next = {
@@ -541,18 +399,13 @@ export const useBubbleStore = create<BubbleState>()(
             [bubble.id]: {
               ...bubble,
               bubbleSize: bubble.bubbleSize ?? RING_CONFIG[bubble.type].baseSize,
-              bubblePosition: bubble.bubblePosition ?? {
-                ring: RING_CONFIG[bubble.type].radius,
-                angle: 0,
-              },
-              metadata: {
-                ...DEFAULT_METADATA[bubble.type],
-                ...bubble.metadata,
-              },
+              bubblePosition: bubble.bubblePosition ?? { ring: RING_CONFIG[bubble.type].radius, angle: 0 },
+              metadata: { ...DEFAULT_METADATA[bubble.type], ...bubble.metadata },
             },
           };
           return { bubbles: ensureBubbleDefaults(next) };
         }),
+
       removeBubble: (id) =>
         set((state) => {
           const next = { ...state.bubbles };
@@ -561,188 +414,88 @@ export const useBubbleStore = create<BubbleState>()(
           delete positions[id];
           return { bubbles: ensureBubbleDefaults(next), localPositions: positions };
         }),
+
       setZoomLevel: (zoom) => set({ zoomLevel: zoom }),
       setSelectedDate: (date) => set({ selectedDate: date }),
       setPinnedBubble: (id) => set({ pinnedBubbleId: id }),
       setCanvasZoom: (zoom) => set({ canvasZoom: Math.max(0.25, Math.min(3.0, zoom)) }),
+
       updateBubblePosition: (id, position) =>
         set((state) => {
           const bubble = state.bubbles[id];
           if (!bubble) return { bubbles: state.bubbles };
-          const normalized =
-            position.x != null && position.y != null
-              ? { x: position.x, y: position.y }
-              : polarToNormalized(position.ring, position.angle);
-          const newPosition = {
-            ring: position.ring,
-            angle: position.angle,
-            x: normalized.x,
-            y: normalized.y,
-          };
+          const norm = position.x != null && position.y != null ? { x: position.x, y: position.y } : polarToNormalized(position.ring, position.angle);
+          const newPos = { ring: position.ring, angle: position.angle, x: norm.x, y: norm.y };
           return {
-            bubbles: {
-              ...state.bubbles,
-              [id]: {
-                ...bubble,
-                bubblePosition: newPosition,
-                metadata: {
-                  ...bubble.metadata,
-                  __locked: true,
-                },
-              },
-            },
-            localPositions: {
-              ...state.localPositions,
-              [id]: newPosition,
-            },
+            bubbles: { ...state.bubbles, [id]: { ...bubble, bubblePosition: newPos, metadata: { ...bubble.metadata, __locked: true } } },
+            localPositions: { ...state.localPositions, [id]: newPos },
           };
         }),
+
       getNextAngle: (type, options = {}) => {
         const state = get();
         const { lifeAreaId, parentId, anchorAngle, wedge } = options;
-        const bubbles = Object.values(state.bubbles).filter((candidate) => {
-          if (candidate.type !== type) return false;
-          switch (type) {
-            case "life_area":
-              return true;
-            case "project":
-            case "process":
-              return candidate.lifeAreaId === lifeAreaId;
-            case "task":
-              return (
-                (candidate.parentId ?? candidate.lifeAreaId ?? "ungrouped") ===
-                (parentId ?? lifeAreaId ?? "ungrouped")
-              );
-            case "idea":
-              if (parentId) {
-                return candidate.parentId === parentId;
-              }
-              return candidate.lifeAreaId === lifeAreaId;
-            default:
-              return true;
-          }
+        const siblings = Object.values(state.bubbles).filter((c) => {
+          if (c.type !== type) return false;
+          if (type === "life_area") return true;
+          if (type === "project" || type === "process") return c.lifeAreaId === lifeAreaId;
+          if (type === "task") return (c.parentId ?? c.lifeAreaId ?? "u") === (parentId ?? lifeAreaId ?? "u");
+          if (type === "idea") return parentId ? c.parentId === parentId : c.lifeAreaId === lifeAreaId;
+          return true;
         });
-        const angles = bubbles
-          .map((bubble) => bubble.bubblePosition?.angle)
-          .filter((angle): angle is number => typeof angle === "number");
-
-        const fallbackAnchor =
-          anchorAngle ??
-          (() => {
-            if (type === "life_area") return -Math.PI / 2;
-            if (type === "project" || type === "process") {
-              const area = lifeAreaId ? state.bubbles[lifeAreaId] : undefined;
-              return area?.bubblePosition?.angle ?? -Math.PI / 2;
-            }
-            if (type === "task" || type === "idea") {
-              const parent = parentId ? state.bubbles[parentId] : undefined;
-              if (parent?.bubblePosition) return parent.bubblePosition.angle;
-              const area = lifeAreaId ? state.bubbles[lifeAreaId] : undefined;
-              return area?.bubblePosition?.angle ?? -Math.PI / 2;
-            }
-            return -Math.PI / 2;
-          })();
-
-        const arc = wedge ?? (() => {
-          if (type === "life_area") return TWO_PI;
-          if (type === "project" || type === "process") return Math.PI / 2;
-          if (type === "task") return Math.PI / 4; // Smaller wedge for better spacing
-          if (type === "idea") return Math.PI / 3; // Smaller wedge for better spacing
-          return TWO_PI;
+        const angles = siblings.map((b) => b.bubblePosition?.angle).filter((a): a is number => typeof a === "number");
+        const fallback = anchorAngle ?? (() => {
+          if (type === "life_area") return -Math.PI / 2;
+          if (type === "project" || type === "process") return state.bubbles[lifeAreaId ?? ""]?.bubblePosition?.angle ?? -Math.PI / 2;
+          const p = parentId ? state.bubbles[parentId] : undefined;
+          if (p?.bubblePosition) return p.bubblePosition.angle;
+          return state.bubbles[lifeAreaId ?? ""]?.bubblePosition?.angle ?? -Math.PI / 2;
         })();
-
-        return computeNextAngle(angles, fallbackAnchor, arc);
+        const arc = wedge ?? (type === "life_area" ? TWO_PI : type === "project" || type === "process" ? Math.PI / 2 : Math.PI / 4);
+        return computeNextAngle(angles, fallback, arc);
       },
-      forgetLocalPosition: (id) =>
-        set((state) => {
-          const positions = { ...state.localPositions };
-          delete positions[id];
-          return { localPositions: positions };
-        }),
+
+      forgetLocalPosition: (id) => set((state) => { const p = { ...state.localPositions }; delete p[id]; return { localPositions: p }; }),
+
       syncUserContext: (userId) =>
         set((state) => {
-          if (state.currentUserId === userId) {
-            return {};
-          }
-          const today = new Date().toISOString().slice(0, 10);
-          return {
-            currentUserId: userId,
-            bubbles: {},
-            localPositions: {},
-            pinnedBubbleId: null,
-            zoomLevel: "day",
-            selectedDate: today,
-            canvasZoom: 0.75,
-          };
+          if (state.currentUserId === userId) return {};
+          return { currentUserId: userId, bubbles: {}, localPositions: {}, pinnedBubbleId: null, zoomLevel: "day", selectedDate: new Date().toISOString().slice(0, 10), canvasZoom: 0.7, layoutVersion: 0 };
         }),
+
       reset: () =>
-        set({
-          bubbles: {},
-          zoomLevel: "day",
-          selectedDate: new Date().toISOString().slice(0, 10),
-          pinnedBubbleId: null,
-          localPositions: {},
-          currentUserId: null,
-          canvasZoom: 0.75,
-        }),
+        set({ bubbles: {}, zoomLevel: "day", selectedDate: new Date().toISOString().slice(0, 10), pinnedBubbleId: null, localPositions: {}, currentUserId: null, canvasZoom: 0.7, layoutVersion: 0 }),
     }),
     {
       name: "life-scope-bubbles",
       partialize: (state) => ({
-        bubbles: state.bubbles,
-        zoomLevel: state.zoomLevel,
-        selectedDate: state.selectedDate,
-        pinnedBubbleId: state.pinnedBubbleId,
-        localPositions: state.localPositions,
-        currentUserId: state.currentUserId,
-        canvasZoom: state.canvasZoom,
+        bubbles: state.bubbles, zoomLevel: state.zoomLevel, selectedDate: state.selectedDate,
+        pinnedBubbleId: state.pinnedBubbleId, localPositions: state.localPositions,
+        currentUserId: state.currentUserId, canvasZoom: state.canvasZoom, layoutVersion: state.layoutVersion,
       }),
     },
   ),
 );
 
-function normalizeAngle(angle: number): number {
-  let result = angle;
-  while (result <= -Math.PI) result += TWO_PI;
-  while (result > Math.PI) result -= TWO_PI;
-  return result;
-}
+// ─── Angle helpers ────────────────────────────────────────────
+function normalizeAngle(a: number) { let r = a; while (r <= -Math.PI) r += TWO_PI; while (r > Math.PI) r -= TWO_PI; return r; }
+function shortestAngleDiff(a: number, b: number) { return normalizeAngle(normalizeAngle(a) - normalizeAngle(b)); }
 
-function shortestAngleDiff(a: number, b: number): number {
-  const diff = normalizeAngle(a) - normalizeAngle(b);
-  return normalizeAngle(diff);
-}
-
-function computeNextAngle(angles: number[], anchorAngle: number, wedge: number): number {
-  if (angles.length === 0) {
-    return normalizeAngle(anchorAngle);
-  }
-
+function computeNextAngle(angles: number[], anchor: number, wedge: number): number {
+  if (angles.length === 0) return normalizeAngle(anchor);
   const sorted = angles.map(normalizeAngle).sort((a, b) => a - b);
-  let bestCandidate = normalizeAngle(anchorAngle);
+  let best = normalizeAngle(anchor);
   let bestScore = -Infinity;
-
-  for (let index = 0; index < sorted.length; index += 1) {
-    const current = sorted[index]!;
-    const next = index === sorted.length - 1 ? sorted[0]! + TWO_PI : sorted[index + 1]!;
-    const gap = next - current;
+  for (let i = 0; i < sorted.length; i++) {
+    const cur = sorted[i]!;
+    const nxt = i === sorted.length - 1 ? sorted[0]! + TWO_PI : sorted[i + 1]!;
+    const gap = nxt - cur;
     if (gap <= 0.01) continue;
-    const midpoint = current + gap / 2;
-    const candidate = normalizeAngle(midpoint);
-
-    const distanceToAnchor = Math.abs(shortestAngleDiff(candidate, anchorAngle));
-    if (wedge < TWO_PI && distanceToAnchor > wedge / 2) {
-      continue;
-    }
-
-    const score = gap - distanceToAnchor * 0.1;
-    if (score > bestScore) {
-      bestScore = score;
-      bestCandidate = candidate;
-    }
+    const mid = normalizeAngle(cur + gap / 2);
+    const dist = Math.abs(shortestAngleDiff(mid, anchor));
+    if (wedge < TWO_PI && dist > wedge / 2) continue;
+    const score = gap - dist * 0.1;
+    if (score > bestScore) { bestScore = score; best = mid; }
   }
-
-  return normalizeAngle(bestCandidate);
+  return normalizeAngle(best);
 }
-
-

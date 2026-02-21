@@ -81,7 +81,7 @@ export function HabitsTracker({
               key={habit.id}
               onClick={() => handleToggle(habit.id!)}
               disabled={pending}
-              className={`flex items-center gap-2 rounded-full px-4 py-2 text-xs font-medium transition ${
+              className={`cursor-pointer flex items-center gap-2 rounded-full px-4 py-2 text-xs font-medium transition ${
                 completed
                   ? "bg-[#0EA8A8] text-white"
                   : "bg-slate-100 text-slate-700 hover:bg-slate-200"

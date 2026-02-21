@@ -17,18 +17,14 @@ import { DayByDayTimeline } from "@/components/DayByDayTimeline";
 import { WheelOfLifeOverlay } from "@/components/WheelOfLifeOverlay";
 import { EmptyHeadPanel } from "@/components/dashboard/EmptyHeadPanel";
 import { PlannerOverlay } from "@/components/dashboard/PlannerOverlay";
-import { CurrentScopeView } from "@/components/dashboard/CurrentScopeView";
-import { VisualizationMatrix } from "@/components/dashboard/VisualizationMatrix";
 import { ScopeZoomControl } from "@/components/ScopeZoomControl";
-import { SocialFeatures } from "@/components/SocialFeatures";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import { CircleCanvas } from "@/components/CircleCanvas";
-import { RING_CONFIG, useBubbleStore } from "@/store/bubbles";
+import { RING_CONFIG, CANVAS_SIZE, useBubbleStore } from "@/store/bubbles";
 import type { BubbleType, Bubble } from "@/store/bubbles";
 import type { BubbleDropResult } from "@/components/CircleCanvas";
-import { AIInsightPanel } from "@/components/AIInsightPanel";
 import { DEFAULT_DAILY_CAPACITY, MAX_FREE_ITEMS } from "@/lib/constants";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import type { DashboardData } from "@/lib/queries";
@@ -165,7 +161,7 @@ function CanvasPanWrapper({ children }: { children: React.ReactNode }) {
     <>
       <div
         ref={containerRef}
-        className="relative w-full h-full"
+        className="absolute inset-0 flex items-center justify-center"
         style={{ 
           cursor: panRef.current.isPanning ? 'grabbing' : 'grab',
           touchAction: 'none',
@@ -180,7 +176,7 @@ function CanvasPanWrapper({ children }: { children: React.ReactNode }) {
       {/* Reset View Button - Fixed in lower right corner */}
       <button
         onClick={resetView}
-        className="fixed bottom-6 right-4 sm:bottom-8 sm:right-8 z-50 flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full bg-white shadow-lg border border-[#0EA8A8]/30 hover:bg-[#0EA8A8]/10 active:bg-[#0EA8A8]/20 transition-colors touch-manipulation"
+        className="fixed bottom-6 right-4 sm:bottom-8 sm:right-8 z-50 flex h-10 w-10 sm:h-12 sm:w-12 cursor-pointer items-center justify-center rounded-full bg-card shadow-md border border-primary/30 hover:bg-primary/10 active:bg-primary/20 transition-colors touch-manipulation"
         title="Center view"
         aria-label="Center view"
       >
@@ -194,7 +190,7 @@ function CanvasPanWrapper({ children }: { children: React.ReactNode }) {
           strokeWidth="2"
           strokeLinecap="round"
           strokeLinejoin="round"
-          className="text-[#0EA8A8]"
+          className="text-primary"
         >
           <circle cx="12" cy="12" r="10" />
           <circle cx="12" cy="12" r="6" />
@@ -207,7 +203,6 @@ function CanvasPanWrapper({ children }: { children: React.ReactNode }) {
 
 type ItemRow = Database["public"]["Tables"]["items"]["Row"];
 
-const CANVAS_SIZE = 640;
 const polarToNormalized = (radius: number, angle: number) => ({
   x: (Math.cos(angle) * radius + CANVAS_SIZE / 2) / CANVAS_SIZE,
   y: (Math.sin(angle) * radius + CANVAS_SIZE / 2) / CANVAS_SIZE,
@@ -284,14 +279,10 @@ export function DashboardClient({
     syncUserContext(user.id);
   }, [syncUserContext, user.id]);
 
-  const initialDateRef = useRef<string | null>(null);
+  const mountedRef = useRef(false);
+  const fetchIdRef = useRef(0);
 
   useEffect(() => {
-    // Store the initial date
-    if (initialDateRef.current === null) {
-      initialDateRef.current = date;
-    }
-    
     hydrate({
       date,
       areas: data.areas,
@@ -309,24 +300,27 @@ export function DashboardClient({
     setHydrated(true);
   }, [hydrate, date, data, events, hydrateBubbles]);
 
-  // Handle date changes from timeline
+  // Fetch fresh data whenever the user picks a different date on the timeline
   useEffect(() => {
     if (!hydrated || !selectedDate) return;
-    
-    // Skip if this is the initial date (already loaded)
-    if (initialDateRef.current !== null && selectedDate === initialDateRef.current) {
+
+    // Skip the very first run — data was already loaded from server props above
+    if (!mountedRef.current) {
+      mountedRef.current = true;
       return;
     }
-    
-    // Fetch data for the selected date
+
+    // Increment a fetch counter so stale responses from rapid scrubbing are dropped
+    const id = ++fetchIdRef.current;
+
     const loadTimelineData = async () => {
       try {
-        console.log("[DashboardClient] Loading timeline data for date:", selectedDate, "Initial date:", initialDateRef.current);
-        // Use dynamic import to ensure server action is loaded correctly
         const { getTimelineData } = await import("@/actions/timeline");
         const payload = await getTimelineData(selectedDate, "day", "full", timezone);
-        
-        console.log("[DashboardClient] Success, payload keys:", Object.keys(payload), "Tasks:", payload.todayTasks?.length, "Ideas:", payload.ideas?.length);
+
+        // If the user already moved to another date while we were fetching, discard
+        if (id !== fetchIdRef.current) return;
+
         hydrate({
           date: selectedDate,
           areas: payload.areas ?? [],
@@ -335,7 +329,6 @@ export function DashboardClient({
           ideas: payload.ideas ?? [],
           events: payload.events ?? [],
         });
-        // Combine allTasks and ideas for full scope on outer edge
         const wheelItems = [...(payload.allTasks ?? []), ...(payload.ideas ?? [])];
         hydrateBubbles({
           lifeAreas: payload.areas ?? [],
@@ -343,11 +336,12 @@ export function DashboardClient({
           items: wheelItems,
         });
       } catch (error) {
+        if (id !== fetchIdRef.current) return;
         console.error("[DashboardClient] Error loading timeline:", error);
         toast.error(`Failed to load timeline: ${error instanceof Error ? error.message : "Unknown error"}`);
       }
     };
-    
+
     loadTimelineData();
   }, [selectedDate, timezone, hydrated, hydrate, hydrateBubbles]);
 
@@ -373,7 +367,7 @@ export function DashboardClient({
     // Include x, y coordinates if present, otherwise calculate from ring/angle
     const normalized = storedPosition?.x != null && storedPosition?.y != null
       ? { x: storedPosition.x, y: storedPosition.y }
-      : { x: (Math.cos(angle) * ring + 320) / 640, y: (Math.sin(angle) * ring + 320) / 640 };
+      : { x: (Math.cos(angle) * ring + CANVAS_SIZE / 2) / CANVAS_SIZE, y: (Math.sin(angle) * ring + CANVAS_SIZE / 2) / CANVAS_SIZE };
 
     return {
       id: row.id,
@@ -423,14 +417,15 @@ export function DashboardClient({
 
   const handleBubbleDrop = async (bubble: Bubble, drop: BubbleDropResult) => {
     const angle = drop.angle;
+    const half = CANVAS_SIZE / 2;
     const baseCoords = {
-      x: 320 + Math.cos(angle) * RING_CONFIG[bubble.type].radius,
-      y: 320 + Math.sin(angle) * RING_CONFIG[bubble.type].radius,
+      x: half + Math.cos(angle) * RING_CONFIG[bubble.type].radius,
+      y: half + Math.sin(angle) * RING_CONFIG[bubble.type].radius,
     };
 
     const coordsForType = (type: BubbleType, customAngle = angle) => ({
-      x: 320 + Math.cos(customAngle) * RING_CONFIG[type].radius,
-      y: 320 + Math.sin(customAngle) * RING_CONFIG[type].radius,
+      x: half + Math.cos(customAngle) * RING_CONFIG[type].radius,
+      y: half + Math.sin(customAngle) * RING_CONFIG[type].radius,
     });
 
     const upsertBubble = useBubbleStore.getState().upsertBubble;
@@ -746,7 +741,6 @@ export function DashboardClient({
             const storedPosition = (newStream.bubble_position as { ring?: number; angle?: number; x?: number; y?: number } | null) ?? null;
             const bubbleType = newStream.kind === "process" ? "process" : "project";
             const config = RING_CONFIG[bubbleType];
-            const CANVAS_SIZE = 640;
             const ring = typeof storedPosition?.ring === "number" ? storedPosition.ring : config.radius;
             const angle = typeof storedPosition?.angle === "number" ? storedPosition.angle : 0;
             const normalized = storedPosition?.x != null && storedPosition?.y != null
@@ -811,7 +805,6 @@ export function DashboardClient({
             
             // Also sync to bubble store
             const storedPosition = (newArea.bubble_position as { ring?: number; angle?: number; x?: number; y?: number } | null) ?? null;
-            const CANVAS_SIZE = 640;
             const ring = typeof storedPosition?.ring === "number" ? storedPosition.ring : RING_CONFIG.life_area.radius;
             const angle = typeof storedPosition?.angle === "number" ? storedPosition.angle : 0;
             const normalized = storedPosition?.x != null && storedPosition?.y != null
@@ -880,27 +873,27 @@ export function DashboardClient({
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-[#FBF9F4] text-[#0B1918]" style={{ overflow: 'visible', touchAction: 'manipulation' }}>
-      <header className="px-4 pb-3 pt-4 sm:px-6 md:px-10 md:pb-4 md:pt-5 relative z-50">
+    <div className="relative flex h-screen flex-col bg-background text-foreground overflow-hidden" style={{ touchAction: 'manipulation' }}>
+      <header className="shrink-0 px-4 pb-3 pt-4 sm:px-6 md:px-10 md:pb-4 md:pt-5 relative z-50">
         {/* Mobile Menu Toggle Button */}
         <div className="flex items-center justify-between mb-3 md:hidden">
           <motion.h1
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1, duration: 0.4 }}
-            className="text-xl font-semibold tracking-tight text-[#0B1918]"
+            className="text-xl font-bold tracking-tight text-foreground"
           >
             Life Scope
           </motion.h1>
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 rounded-lg hover:bg-[#0EA8A8]/10 active:bg-[#0EA8A8]/20 transition-colors touch-manipulation"
+            className="cursor-pointer p-2 rounded-lg hover:bg-primary/10 active:bg-primary/20 transition-colors touch-manipulation"
             aria-label="Toggle menu"
           >
             {mobileMenuOpen ? (
-              <X className="h-6 w-6 text-[#0B1918]" />
+              <X className="h-6 w-6 text-foreground" />
             ) : (
-              <Menu className="h-6 w-6 text-[#0B1918]" />
+              <Menu className="h-6 w-6 text-foreground" />
             )}
           </button>
         </div>
@@ -921,74 +914,57 @@ export function DashboardClient({
             transition={{ duration: 0.2 }}
             className="overflow-hidden md:!h-auto md:!opacity-100 md:!block"
           >
-            <div className="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)_minmax(280px,1fr)] xl:grid-cols-[minmax(0,1fr)_320px_minmax(300px,1fr)] items-start pb-4 md:pb-0">
+            <div className="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-[minmax(0,1.1fr)_minmax(260px,0.9fr)_minmax(260px,1fr)] xl:grid-cols-[minmax(0,1fr)_300px_minmax(280px,1fr)] items-start pb-4 md:pb-0">
+            {/* Left column: Title + Input + Mode buttons */}
             <div className="space-y-2 md:col-span-2 lg:col-span-1">
-              <div className="space-y-0.5 md:block">
+              <div className="space-y-0.5 hidden md:block">
                 <motion.h1
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.1, duration: 0.4 }}
-                  className="text-xl sm:text-2xl font-semibold tracking-tight text-[#0B1918] md:text-3xl hidden md:block"
+                  className="text-lg sm:text-xl font-bold tracking-tight md:text-2xl"
                 >
                   Life Scope
                 </motion.h1>
-                <p className="text-[10px] sm:text-xs text-[#195552] hidden md:block">Plan your entire life beautifully.</p>
+                <p className="text-xs text-muted-foreground">Plan your entire life beautifully.</p>
               </div>
               <div className="flex flex-col gap-2">
-                <div className="flex h-8 sm:h-9 w-full max-w-xl items-center gap-1.5 sm:gap-2 rounded-full border border-[#0EA8A8]/25 bg-white px-2 sm:px-3 shadow-[0_10px_24px_-20px_rgba(15,75,68,0.35)]">
+                <div className="flex h-9 w-full max-w-xl items-center gap-2 rounded-lg border bg-card px-3 shadow-xs">
                   <Input
                     placeholder="Add a task or idea..."
-                    className="h-full flex-1 border-0 bg-transparent text-[10px] sm:text-xs text-[#0B1918] placeholder:text-[#0EA8A8]/60 focus-visible:ring-0 focus-visible:ring-offset-0"
+                    className="h-full flex-1 border-0 bg-transparent text-sm placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
                     onFocus={() => setCoachOpen(true)}
                     readOnly
                   />
-                  <Pencil className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-[#0EA8A8] flex-shrink-0" />
-                  <Button
-                    onClick={() => setCoachOpen(true)}
-                    className="h-6 sm:h-7 rounded-full bg-[#FFD833] px-3 sm:px-4 text-[10px] sm:text-xs font-semibold text-[#0B1918] shadow-sm transition hover:bg-[#FECB32] flex-shrink-0"
-                  >
+                  <Pencil className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  <Button size="sm" onClick={() => setCoachOpen(true)} className="h-7 shrink-0">
                     Add
                   </Button>
                 </div>
-                <div className="flex flex-wrap gap-1 sm:gap-1.5">
-                  <Button
-                    variant="outline"
-                    onClick={() => setEmptyHeadOpen(true)}
-                    className="h-6 sm:h-7 rounded-full border-[#0EA8A8]/30 bg-white px-2 sm:px-3 text-[9px] sm:text-[10px] font-semibold text-[#0EA8A8] hover:border-[#0EA8A8]/60"
-                  >
-                    DUMP MODE
+                <div className="flex flex-wrap gap-1.5">
+                  <Button variant="outline" size="sm" onClick={() => setEmptyHeadOpen(true)} className="h-7 text-xs">
+                    Dump Mode
                   </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => setPlannerOpen(true)}
-                    className="h-6 sm:h-7 rounded-full border-[#FFD833]/50 bg-[#FFF4DB] px-2 sm:px-3 text-[9px] sm:text-[10px] font-semibold text-[#0B1918] hover:border-[#FFD833]/70"
-                  >
-                    PLANNER MODE
+                  <Button variant="secondary" size="sm" onClick={() => setPlannerOpen(true)} className="h-7 text-xs">
+                    Planner Mode
                   </Button>
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-col items-center sm:items-start gap-2 rounded-2xl border border-[#0EA8A8]/20 bg-white/80 px-2 sm:px-3 py-2 shadow-[0_18px_45px_-30px_rgba(14,168,168,0.45)] backdrop-blur-sm relative z-50 md:col-span-1">
+            {/* Center column: Gamification + Zoom + Wheel */}
+            <div className="flex flex-col items-stretch gap-2 rounded-lg border bg-card p-2.5 shadow-xs relative z-50 md:col-span-1">
               <GamificationHUD summary={xpSummary} />
               <ScopeZoomControl timezone={timezone} />
-              <Button
-                variant="outline"
-                onClick={() => setWheelOverlayOpen(true)}
-                className="h-6 sm:h-7 w-full sm:w-auto rounded-full border-[#0EA8A8]/40 px-2 sm:px-3 text-[9px] sm:text-[10px] font-semibold text-[#0EA8A8] hover:border-[#0EA8A8]/70"
-              >
+              <Button variant="outline" size="sm" onClick={() => setWheelOverlayOpen(true)} className="h-7 w-full text-xs">
                 View Wheel of Life
               </Button>
             </div>
 
+            {/* Right column: Logout + Capacity */}
             <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 relative z-50 md:col-span-1 lg:col-span-1">
-              <Button
-                variant="ghost"
-                onClick={handleLogout}
-                className="h-6 sm:h-7 rounded-full px-2 sm:px-2.5 text-[9px] sm:text-[10px] font-semibold text-[#195552] hover:text-[#0B1918] hover:bg-[#0EA8A8]/10 order-2 sm:order-1"
-                title="Log out"
-              >
-                <LogOut className="h-3 w-3 sm:h-3.5 sm:w-3.5 mr-1" />
+              <Button variant="ghost" size="sm" onClick={handleLogout} className="h-7 text-xs order-2 sm:order-1" title="Log out">
+                <LogOut className="h-3.5 w-3.5 mr-1" />
                 <span className="hidden sm:inline">Logout</span>
               </Button>
               <CapacityHUD
@@ -1004,30 +980,26 @@ export function DashboardClient({
         </motion.div>
       </header>
 
-      <main className="relative flex-1" style={{ position: 'relative', overflow: 'visible', width: '100%', touchAction: 'manipulation' }}>
-        <div className="absolute inset-0 flex items-center justify-center">
-          <CanvasPanWrapper>
-            <div className="w-full flex items-center justify-center" style={{ height: '100%' }}>
-              <motion.section
-                className="relative flex items-center justify-center"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: hydrated ? 1 : 0 }}
-                style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
-              >
-                <CircleCanvas
-                  onSelectBubble={handleSelectBubble}
-                  onBubbleDrop={handleBubbleDrop}
-                />
-              </motion.section>
-            </div>
-          </CanvasPanWrapper>
-        </div>
+      <main className="relative flex-1 min-h-0">
+        <CanvasPanWrapper>
+          <motion.div
+            className="flex items-center justify-center w-full h-full"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: hydrated ? 1 : 0 }}
+            style={{ touchAction: 'pan-x pan-y pinch-zoom' }}
+          >
+            <CircleCanvas
+              onSelectBubble={handleSelectBubble}
+              onBubbleDrop={handleBubbleDrop}
+            />
+          </motion.div>
+        </CanvasPanWrapper>
         
         {/* Day-by-day timeline - floating element */}
         {hydrated ? (
           <motion.div
-            className="fixed left-1/2 transform -translate-x-1/2 z-40 w-[calc(100%-5rem)] sm:w-auto max-w-2xl"
-            style={{ bottom: 'clamp(1rem, 1.5rem, 2rem)' }}
+            className="fixed left-1/2 transform -translate-x-1/2 z-40 w-[calc(100%-4rem)] sm:w-auto max-w-2xl"
+            style={{ bottom: '1.5rem' }}
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
           >
@@ -1052,8 +1024,6 @@ export function DashboardClient({
       <AreaSheet />
       <EmptyHeadPanel />
       <PlannerOverlay />
-      <CurrentScopeView />
-      <VisualizationMatrix />
     </div>
   );
 }

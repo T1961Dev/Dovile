@@ -22,9 +22,9 @@ function AuthCallbackContent() {
   }, [router, searchParams]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50">
-      <div className="rounded-3xl bg-white p-6 text-sm text-slate-600 shadow">
-        Finishing sign-in…
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="rounded-xl bg-card p-6 text-sm text-muted-foreground shadow-md border">
+        Finishing sign-in&hellip;
       </div>
     </div>
   );
@@ -33,9 +33,9 @@ function AuthCallbackContent() {
 export default function AuthCallbackPage() {
   return (
     <Suspense fallback={
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="rounded-3xl bg-white p-6 text-sm text-slate-600 shadow">
-          Loading…
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="rounded-xl bg-card p-6 text-sm text-muted-foreground shadow-md border">
+          Loading&hellip;
         </div>
       </div>
     }>
@@ -43,4 +43,3 @@ export default function AuthCallbackPage() {
     </Suspense>
   );
 }
-

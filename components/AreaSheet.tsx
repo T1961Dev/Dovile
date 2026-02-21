@@ -1,23 +1,23 @@
 "use client";
 
 import { useMemo, useState, useEffect, useCallback } from "react";
-import { motion } from "framer-motion";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { createWorkstreamAction, updateWorkstreamAction } from "@/actions/workstreams";
 import { createItemAction, updateItemAction, startTaskAction, completeItemAction, getItemAction, archiveIdeaAction, restoreIdeaAction, getArchivedIdeasAction } from "@/actions/items";
 import { updateLifeAreaAction, deleteLifeAreaAction } from "@/actions/life-areas";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import type { Item, Workstream } from "@/types/entities";
-import { useBubbleStore, RING_CONFIG, type Bubble } from "@/store/bubbles";
+import { useBubbleStore, RING_CONFIG, CANVAS_SIZE, type Bubble } from "@/store/bubbles";
 import { getTodayISO } from "@/lib/dates";
 import { toast } from "sonner";
-
-const CANVAS_SIZE = 640;
 
 const polarToNormalized = (radius: number, angle: number) => ({
   x: (Math.cos(angle) * radius + CANVAS_SIZE / 2) / CANVAS_SIZE,
@@ -48,30 +48,27 @@ export function AreaSheet() {
   const selectedBubble = selectedBubbleId ? bubbles[selectedBubbleId] : null;
   const [fetchedItem, setFetchedItem] = useState<Item | null>(null);
   const [isLoadingItem, setIsLoadingItem] = useState(false);
-  
-  // Get the area/project/task/idea based on bubble type
+
   const area = selectedBubbleType === "life_area" ? areas.find((entry) => entry.id === selectedBubbleId) : null;
   const project = (selectedBubbleType === "project" || selectedBubbleType === "process") ? workstreams.find((w) => w.id === selectedBubbleId) : null;
-  
-  // Try to find item in store first, if not found and it's a task/idea, fetch it
-  const itemFromStore = (selectedBubbleType === "task" || selectedBubbleType === "idea") 
-    ? [...tasks, ...ideas].find((i) => i.id === selectedBubbleId) 
+
+  const itemFromStore = (selectedBubbleType === "task" || selectedBubbleType === "idea")
+    ? [...tasks, ...ideas].find((i) => i.id === selectedBubbleId)
     : null;
-  
+
   const item = itemFromStore || fetchedItem;
-  
-  // Fetch item if not in store (e.g., completed tasks)
+
   useEffect(() => {
     if ((selectedBubbleType === "task" || selectedBubbleType === "idea") && selectedBubbleId && !itemFromStore) {
       let cancelled = false;
       setIsLoadingItem(true);
       setFetchedItem(null);
-      
+
       getItemAction(selectedBubbleId)
         .then((item) => {
           if (!cancelled && item) {
             setFetchedItem(item as Item);
-            upsertItem(item as Item); // Add to store
+            upsertItem(item as Item);
           } else if (!cancelled) {
             setFetchedItem(null);
           }
@@ -84,23 +81,18 @@ export function AreaSheet() {
           }
         })
         .finally(() => {
-          if (!cancelled) {
-            setIsLoadingItem(false);
-          }
+          if (!cancelled) setIsLoadingItem(false);
         });
-      
-      return () => {
-        cancelled = true;
-        setIsLoadingItem(false);
-      };
+
+      return () => { cancelled = true; setIsLoadingItem(false); };
     } else if (itemFromStore) {
-      // Clear fetched item if we now have it in store
       setFetchedItem(null);
       setIsLoadingItem(false);
     } else {
       setIsLoadingItem(false);
     }
   }, [selectedBubbleId, selectedBubbleType, itemFromStore, upsertItem]);
+
   const [activeTab, setActiveTab] = useState<TabKey>("projects");
   const [workstreamTitle, setWorkstreamTitle] = useState("");
   const [workstreamDescription, setWorkstreamDescription] = useState("");
@@ -112,21 +104,13 @@ export function AreaSheet() {
   const [archivedIdeas, setArchivedIdeas] = useState<Item[]>([]);
   const [loadingArchived, setLoadingArchived] = useState(false);
 
-  // Fetch archived ideas when archive tab is active
   useEffect(() => {
     if (activeTab === "archive" && selectedBubbleType === "life_area" && selectedBubbleId) {
       setLoadingArchived(true);
       getArchivedIdeasAction(selectedBubbleId)
-        .then((items) => {
-          setArchivedIdeas(items as Item[]);
-        })
-        .catch((error) => {
-          console.error("Failed to fetch archived ideas:", error);
-          toast.error("Failed to load archived ideas");
-        })
-        .finally(() => {
-          setLoadingArchived(false);
-        });
+        .then((items) => setArchivedIdeas(items as Item[]))
+        .catch((error) => { console.error(error); toast.error("Failed to load archived ideas"); })
+        .finally(() => setLoadingArchived(false));
     } else if (activeTab !== "archive") {
       setArchivedIdeas([]);
     }
@@ -156,191 +140,69 @@ export function AreaSheet() {
     setCreatingWorkstream(true);
     try {
       const created = await createWorkstreamAction({
-        lifeAreaId: targetArea.id,
-        title: workstreamTitle,
-        description: workstreamDescription,
-        kind: mapTabToKind(activeTab),
+        lifeAreaId: targetArea.id, title: workstreamTitle, description: workstreamDescription, kind: mapTabToKind(activeTab),
       });
-      const nextList = [
-        ...workstreams.filter((stream) => stream.id !== created.id),
-        created as Workstream,
-      ];
-      setWorkstreams(nextList);
-
+      setWorkstreams([...workstreams.filter((s) => s.id !== created.id), created as Workstream]);
       const bubbleType = created.kind === "process" ? "process" : "project";
-      const slotAngle = getNextAngle(bubbleType, {
-        lifeAreaId: targetArea.id,
-      });
+      const slotAngle = getNextAngle(bubbleType, { lifeAreaId: targetArea.id });
       const config = RING_CONFIG[bubbleType];
       const normalized = polarToNormalized(config.radius, slotAngle);
-      upsertBubble({
-        id: created.id,
-        type: bubbleType,
-        lifeAreaId: targetArea.id,
-        title: created.title,
-        status: created.active ? "active" : "archived",
-        bubbleSize: config.baseSize,
-        bubblePosition: { ring: config.radius, angle: slotAngle, x: normalized.x, y: normalized.y },
-        metadata: {
-          description: created.description,
-          kind: created.kind,
-        },
-      });
+      upsertBubble({ id: created.id, type: bubbleType, lifeAreaId: targetArea.id, title: created.title, status: created.active ? "active" : "archived", bubbleSize: config.baseSize, bubblePosition: { ring: config.radius, angle: slotAngle, x: normalized.x, y: normalized.y }, metadata: { description: created.description, kind: created.kind } });
       updateBubblePosition(created.id, { ring: config.radius, angle: slotAngle, x: normalized.x, y: normalized.y });
-      await updateWorkstreamAction(created.id, {
-        bubble_position: { ring: config.radius, angle: slotAngle, x: normalized.x, y: normalized.y },
-        bubble_size: config.baseSize,
-      } as any);
+      await updateWorkstreamAction(created.id, { bubble_position: { ring: config.radius, angle: slotAngle, x: normalized.x, y: normalized.y }, bubble_size: config.baseSize } as any);
       useBubbleStore.getState().forgetLocalPosition(created.id);
       setWorkstreamTitle("");
       setWorkstreamDescription("");
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setCreatingWorkstream(false);
-    }
+    } catch (error) { console.error(error); } finally { setCreatingWorkstream(false); }
   };
 
   const handleCreateItem = async () => {
     if (!selectedBubbleId || !newItemTitle.trim()) return;
-    
     let lifeAreaId: string | undefined;
     let workstreamId: string | undefined;
-    
-    if (selectedBubbleType === "life_area") {
-      lifeAreaId = selectedBubbleId;
-    } else if (selectedBubbleType === "project" || selectedBubbleType === "process") {
+    if (selectedBubbleType === "life_area") { lifeAreaId = selectedBubbleId; }
+    else if (selectedBubbleType === "project" || selectedBubbleType === "process") {
       workstreamId = selectedBubbleId;
-      const workstream = workstreams.find((w) => w.id === selectedBubbleId);
-      lifeAreaId = workstream?.life_area_id ?? undefined;
-    } else {
-      return; // Can't add items to items
-    }
-    
-    if (!lifeAreaId) {
-      return; // Life area ID is required
-    }
-    
+      lifeAreaId = workstreams.find((w) => w.id === selectedBubbleId)?.life_area_id ?? undefined;
+    } else return;
+    if (!lifeAreaId) return;
     setSubmittingItem(true);
     try {
-      // For tasks, set scheduled_for to today's date so they appear in todayTasks
       const today = selectedDate || getTodayISO();
-      const scheduledFor = itemType === "task" ? today : null;
-      
-      const created = await createItemAction({
-        life_area_id: lifeAreaId,
-        workstream_id: workstreamId,
-        title: newItemTitle,
-        notes: newItemNotes || null,
-        type: itemType,
-        status: "pending",
-        scheduled_for: scheduledFor,
-      } as any);
+      const created = await createItemAction({ life_area_id: lifeAreaId, workstream_id: workstreamId, title: newItemTitle, notes: newItemNotes || null, type: itemType, status: "pending", scheduled_for: itemType === "task" ? today : null } as any);
       const bubbleType = itemType === "task" ? "task" : "idea";
       const config = RING_CONFIG[bubbleType];
-      const slotAngle = getNextAngle(bubbleType, {
-        lifeAreaId,
-        parentId: workstreamId,
-      });
+      const slotAngle = getNextAngle(bubbleType, { lifeAreaId, parentId: workstreamId });
       const normalized = polarToNormalized(config.radius, slotAngle);
-      const updated = await updateItemAction(created.id, {
-        bubble_position: { ring: config.radius, angle: slotAngle, x: normalized.x, y: normalized.y },
-        bubble_size: config.baseSize,
-      } as any);
-      
-      // Add to dashboard store
+      const updated = await updateItemAction(created.id, { bubble_position: { ring: config.radius, angle: slotAngle, x: normalized.x, y: normalized.y }, bubble_size: config.baseSize } as any);
       upsertItem(updated as Item);
-      
-      // Add to bubble store with proper position - ensure it has x, y coordinates
-      const newBubble: Bubble = {
-        id: updated.id,
-        type: bubbleType,
-        lifeAreaId,
-        parentId: workstreamId ?? undefined,
-        title: updated.title,
-        status: updated.status,
-        bubbleSize: config.baseSize,
-        bubblePosition: {
-          ring: config.radius,
-          angle: slotAngle,
-          x: normalized.x,
-          y: normalized.y,
-        },
-        metadata: {
-          scheduledFor: updated.scheduled_for,
-          notes: updated.notes,
-          __locked: true,
-        },
-      };
-      
-      // Add to bubble store with __locked flag to prevent repositioning and preserve during hydration
+      const newBubble: Bubble = { id: updated.id, type: bubbleType, lifeAreaId, parentId: workstreamId ?? undefined, title: updated.title, status: updated.status, bubbleSize: config.baseSize, bubblePosition: { ring: config.radius, angle: slotAngle, x: normalized.x, y: normalized.y }, metadata: { scheduledFor: updated.scheduled_for, notes: updated.notes, __locked: true } };
       upsertBubble(newBubble);
-      
-      // Update position to ensure it's locked and persists
-      updateBubblePosition(updated.id, { 
-        ring: config.radius, 
-        angle: slotAngle, 
-        x: normalized.x, 
-        y: normalized.y 
-      });
-      
-      // Force update the bubble with __locked flag to ensure it persists through hydration
+      updateBubblePosition(updated.id, { ring: config.radius, angle: slotAngle, x: normalized.x, y: normalized.y });
       const bubbleStore = useBubbleStore.getState();
       const currentBubble = bubbleStore.bubbles[updated.id];
       if (currentBubble && !currentBubble.metadata?.__locked) {
-        bubbleStore.upsertBubble({
-          ...currentBubble,
-          metadata: {
-            ...currentBubble.metadata,
-            __locked: true,
-          },
-        });
+        bubbleStore.upsertBubble({ ...currentBubble, metadata: { ...currentBubble.metadata, __locked: true } });
       }
-      
-      // Verify the bubble was added correctly
-      const addedBubble = bubbleStore.bubbles[updated.id];
-      if (!addedBubble) {
-        console.error("Bubble was not added to store", updated.id);
-        toast.error("Task created but not visible. Try refreshing.");
-      } else if (!addedBubble.metadata?.__locked) {
-        console.warn("Bubble was added but __locked is not set", updated.id);
-        // Force set it
-        bubbleStore.upsertBubble({
-          ...addedBubble,
-          metadata: {
-            ...addedBubble.metadata,
-            __locked: true,
-          },
-        });
-      }
-      
-      toast.success(`${itemType === "task" ? "Task" : "Idea"} added successfully`);
+      toast.success(`${itemType === "task" ? "Task" : "Idea"} added`);
       setNewItemTitle("");
       setNewItemNotes("");
-    } catch (error) {
-      console.error(error);
-      toast.error(`Failed to create ${itemType}`);
-    } finally {
-      setSubmittingItem(false);
-    }
+    } catch (error) { console.error(error); toast.error(`Failed to create ${itemType}`); } finally { setSubmittingItem(false); }
   };
 
   const isOpen = Boolean(selectedBubbleId && selectedBubble);
   const displayTitle = area?.name || project?.title || item?.title || "";
-  const displayColor = area?.color || (selectedBubble?.type === "project" ? "#28B7A3" : selectedBubble?.type === "process" ? "#FF8F5A" : selectedBubble?.type === "task" ? "#F4B13E" : selectedBubble?.type === "idea" ? "#8F8CF5" : "#0EA8A8");
+  const displayColor = area?.color || (selectedBubble?.type === "project" ? "#7FE5D1" : selectedBubble?.type === "process" ? "#FFBC85" : selectedBubble?.type === "task" ? "#FF7348" : selectedBubble?.type === "idea" ? "#DED6FF" : "#0EA8A8");
 
   return (
     <Sheet open={isOpen} onOpenChange={(next) => !next && closeBubbleSheet()}>
-      <SheetContent side="right" className="flex w-full max-w-xl flex-col gap-6 bg-[#FDFBF6] p-8">
+      <SheetContent side="right" className="flex w-full sm:!max-w-xl flex-col gap-0 overflow-y-auto bg-background p-4 sm:p-6">
         {selectedBubble ? (
           <>
-            <SheetHeader className="text-left">
-              <div className="flex items-center justify-between">
-                <SheetTitle className="flex items-center gap-3 text-2xl font-semibold text-[#0B1918]">
-                  <span
-                    className="inline-block h-3 w-3 rounded-full"
-                    style={{ backgroundColor: displayColor }}
-                  />
+            <SheetHeader className="p-0 pb-4">
+              <div className="flex items-center justify-between gap-2">
+                <SheetTitle className="flex items-center gap-2 text-base sm:text-lg font-bold min-w-0">
+                  <span className="inline-block h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: displayColor }} />
                   {selectedBubbleType === "life_area" && area ? (
                     <input
                       type="text"
@@ -351,396 +213,200 @@ export function AreaSheet() {
                           updateLifeAreaAction(area.id, { name: newName })
                             .then((updated) => {
                               setAreas(areas.map((a) => (a.id === updated.id ? updated as any : a)));
-                              upsertBubble({
-                                ...selectedBubble!,
-                                title: updated.name,
-                              });
-                              toast.success("Life area renamed");
+                              upsertBubble({ ...selectedBubble!, title: updated.name });
+                              toast.success("Renamed");
                             })
-                            .catch((error) => {
-                              console.error(error);
-                              toast.error("Failed to rename life area");
-                              e.target.value = area.name; // Restore on error
-                            });
-                        } else if (!newName) {
-                          e.target.value = area.name; // Restore if empty
-                        }
+                            .catch((err) => { console.error(err); toast.error("Failed to rename"); e.target.value = area.name; });
+                        } else if (!newName) { e.target.value = area.name; }
                       }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.currentTarget.blur();
-                        }
-                      }}
-                      className="text-2xl font-semibold border-none p-0 h-auto focus-visible:ring-0 bg-transparent outline-none"
+                      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                      className="text-base sm:text-lg font-bold border-none p-0 h-auto focus-visible:ring-0 bg-transparent outline-none min-w-0 w-full truncate"
                     />
                   ) : (
-                    displayTitle
+                    <span className="truncate">{displayTitle}</span>
                   )}
                 </SheetTitle>
                 {selectedBubbleType === "life_area" && area && (
                   <Button
                     size="sm"
-                    variant="outline"
+                    variant="destructive"
+                    className="h-7 rounded-lg px-3 text-xs"
                     onClick={async () => {
-                      if (confirm(`Delete "${area.name}"? This will also delete all projects, processes, and items in this life area.`)) {
+                      if (confirm(`Delete "${area.name}"? All projects and items will be removed.`)) {
                         try {
                           await deleteLifeAreaAction(area.id);
                           setAreas(areas.filter((a) => a.id !== area.id));
                           removeBubble(area.id);
-                          toast.success("Life area deleted");
+                          toast.success("Deleted");
                           closeBubbleSheet();
-                        } catch (error) {
-                          console.error(error);
-                          toast.error("Failed to delete life area");
-                        }
+                        } catch (err) { console.error(err); toast.error("Failed to delete"); }
                       }
                     }}
-                    className="h-8 rounded-full border-red-400/40 px-4 text-xs font-semibold text-red-600 hover:border-red-600/70"
                   >
                     Delete
                   </Button>
                 )}
               </div>
               {selectedBubble.metadata?.description ? (
-                <p className="mt-2 text-sm text-[#195552]">
-                  {String(selectedBubble.metadata.description)}
-                </p>
-              ) : null}
-              {selectedBubble.metadata?.notes && item ? (
-                <p className="mt-2 text-xs text-[#195552]/80">
-                  {String(selectedBubble.metadata.notes)}
-                </p>
+                <SheetDescription>{String(selectedBubble.metadata.description)}</SheetDescription>
               ) : null}
             </SheetHeader>
 
+            <Separator className="my-3" />
+
+            {/* Life Area: Tabs for Projects / Processes / Archive / Items */}
             {selectedBubbleType === "life_area" && (
-              <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabKey)}>
-                <TabsList className="grid w-full grid-cols-4 rounded-full bg-[#D6FFF3]/60">
-                  <TabsTrigger value="projects" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-[#0B1918]">
-                    Projects
-                  </TabsTrigger>
-                  <TabsTrigger value="processes" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-[#0B1918]">
-                    Processes
-                  </TabsTrigger>
-                  <TabsTrigger value="archive" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-[#0B1918]">
-                    Archive
-                  </TabsTrigger>
-                  <TabsTrigger value="items" className="rounded-full data-[state=active]:bg-white data-[state=active]:text-[#0B1918]">
-                    All Items
-                  </TabsTrigger>
+              <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabKey)}>
+                <TabsList className="w-full h-8">
+                  <TabsTrigger value="projects" className="flex-1 text-xs">Projects</TabsTrigger>
+                  <TabsTrigger value="processes" className="flex-1 text-xs">Processes</TabsTrigger>
+                  <TabsTrigger value="archive" className="flex-1 text-xs">Archive</TabsTrigger>
+                  <TabsTrigger value="items" className="flex-1 text-xs">All</TabsTrigger>
                 </TabsList>
-                <TabsContent value="projects" className="mt-4 space-y-4">
-                  <WorkstreamList
-                    workstreams={filteredWorkstreams.filter((stream) => stream.kind === "project")}
-                  />
+                <TabsContent value="projects" className="mt-3 space-y-2">
+                  <WorkstreamList workstreams={filteredWorkstreams.filter((s) => s.kind === "project")} />
                 </TabsContent>
-                <TabsContent value="processes" className="mt-4 space-y-4">
-                  <WorkstreamList
-                    workstreams={filteredWorkstreams.filter((stream) => stream.kind === "process")}
-                  />
+                <TabsContent value="processes" className="mt-3 space-y-2">
+                  <WorkstreamList workstreams={filteredWorkstreams.filter((s) => s.kind === "process")} />
                 </TabsContent>
-                <TabsContent value="archive" className="mt-4 space-y-4">
+                <TabsContent value="archive" className="mt-3 space-y-2">
                   {loadingArchived ? (
-                    <div className="py-8 text-center text-sm text-[#195552]">
-                      Loading archived ideas...
-                    </div>
+                    <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
                   ) : archivedIdeas.length === 0 ? (
                     <EmptyState message="No archived ideas yet." />
                   ) : (
-                    <div className="space-y-3">
-                      {archivedIdeas.map((item) => (
-                        <motion.div
-                          key={item.id}
-                          className="rounded-2xl border border-[#0EA8A8]/15 bg-white p-4 shadow-sm"
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1">
-                              <h4 className="text-sm font-semibold text-[#0B1918]">{item.title}</h4>
-                              {item.notes && <p className="mt-1 text-xs text-slate-500">{item.notes}</p>}
+                    <div className="space-y-2">
+                      {archivedIdeas.map((idea) => (
+                        <Card key={idea.id} className="py-3">
+                          <CardContent className="flex items-center justify-between gap-3 px-4 py-0">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium truncate">{idea.title}</p>
+                              {idea.notes && <p className="text-xs text-muted-foreground mt-0.5 truncate">{idea.notes}</p>}
                             </div>
-                            <div className="flex gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={async () => {
-                                  try {
-                                    const restored = await restoreIdeaAction(item.id);
-                                    upsertItem(restored as Item);
-                                    setArchivedIdeas((prev) => prev.filter((i) => i.id !== item.id));
-                                    toast.success("Idea restored");
-                                  } catch (error) {
-                                    console.error(error);
-                                    toast.error("Couldn't restore idea");
-                                  }
-                                }}
-                                className="h-8 rounded-full border-[#0EA8A8]/40 px-4 text-xs font-semibold text-[#0EA8A8] hover:border-[#0EA8A8]/70"
-                              >
-                                Restore
-                              </Button>
-                            </div>
-                          </div>
-                        </motion.div>
+                            <Button size="sm" variant="outline" className="h-7 text-xs shrink-0"
+                              onClick={async () => {
+                                try { const r = await restoreIdeaAction(idea.id); upsertItem(r as Item); setArchivedIdeas((p) => p.filter((i) => i.id !== idea.id)); toast.success("Restored"); }
+                                catch { toast.error("Couldn't restore"); }
+                              }}>Restore</Button>
+                          </CardContent>
+                        </Card>
                       ))}
                     </div>
                   )}
                 </TabsContent>
-                <TabsContent value="items" className="mt-4 space-y-4">
+                <TabsContent value="items" className="mt-3 space-y-2">
                   <ItemList items={areaItems} />
                 </TabsContent>
               </Tabs>
             )}
 
+            {/* Project/Process: Show child items */}
             {(selectedBubbleType === "project" || selectedBubbleType === "process") && (
-              <div className="space-y-4">
-                <h3 className="text-sm font-semibold uppercase tracking-[0.2em] text-[#0EA8A8]">
-                  Tasks & Ideas
-                </h3>
+              <div className="space-y-3 mt-3">
+                <p className="text-xs font-medium uppercase tracking-wider text-primary">Tasks & Ideas</p>
                 <ItemList items={areaItems} />
               </div>
             )}
 
+            {/* Task/Idea detail view */}
             {(selectedBubbleType === "task" || selectedBubbleType === "idea") && (
-              <div className="space-y-4 rounded-3xl border border-[#0EA8A8]/15 bg-white p-5 shadow-sm">
-                {isLoadingItem ? (
-                  <div className="py-8 text-center text-sm text-[#195552]">
-                    Loading task details...
-                  </div>
-                ) : item ? (
-                  <>
-                <div>
-                  <h3 className="text-sm font-semibold text-[#0B1918]">Details</h3>
-                  <p className="mt-2 text-xs text-[#195552]">
-                    <span className="font-medium">Type:</span> {item.type}
-                  </p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="text-xs text-[#195552]">
-                      <span className="font-medium">Status:</span>{" "}
-                      <span className={`font-semibold ${
-                        item.status === "done" 
-                          ? "text-[#0EA8A8]" 
-                          : item.status === "in_progress"
-                            ? "text-[#FFD833]"
-                            : item.status === "pending"
-                              ? "text-[#F4B13E]"
-                              : "text-[#195552]/60"
-                      }`}>
-                        {item.status === "in_progress" ? "In Progress" : item.status}
-                      </span>
-                    </span>
-                  </div>
-                  {item.scheduled_for && (
-                    <p className="mt-1 text-xs text-[#195552]">
-                      <span className="font-medium">Scheduled:</span> {new Date(item.scheduled_for).toLocaleDateString()}
-                    </p>
+              <Card className="py-4 mt-3">
+                <CardContent className="space-y-4 px-4 py-0">
+                  {isLoadingItem ? (
+                    <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
+                  ) : item ? (
+                    <>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant="secondary" className="capitalize">{item.type}</Badge>
+                        <Badge variant={item.status === "done" ? "default" : item.status === "in_progress" ? "secondary" : "outline"} className="capitalize">
+                          {item.status === "in_progress" ? "In Progress" : item.status}
+                        </Badge>
+                      </div>
+                      {item.scheduled_for && (
+                        <p className="text-xs text-muted-foreground">Scheduled: {new Date(item.scheduled_for).toLocaleDateString()}</p>
+                      )}
+                      {item.due_date && (
+                        <p className="text-xs text-muted-foreground">Due: {new Date(item.due_date).toLocaleDateString()}</p>
+                      )}
+                      {item.notes && (
+                        <div>
+                          <p className="text-xs font-medium mb-1">Notes</p>
+                          <p className="text-xs text-muted-foreground">{item.notes}</p>
+                        </div>
+                      )}
+                      <Separator />
+                      <div className="flex flex-wrap gap-2">
+                        {item.type === "task" && item.status !== "done" && item.status !== "archived" && (
+                          <>
+                            {item.status !== "in_progress" && (
+                              <Button size="sm" className="h-8 text-xs"
+                                onClick={async () => { try { const u = await startTaskAction(item.id); upsertItem(u as Item); upsertBubble({ ...selectedBubble!, status: u.status }); toast.success("Started"); } catch { toast.error("Failed"); } }}>
+                                Start Task
+                              </Button>
+                            )}
+                            {item.status === "in_progress" && (
+                              <Button size="sm" className="h-8 text-xs"
+                                onClick={async () => { try { const u = await completeItemAction(item.id); upsertItem(u as Item); upsertBubble({ ...selectedBubble!, status: u.status }); toast.success("Done!"); window.dispatchEvent(new CustomEvent("refresh-xp")); } catch { toast.error("Failed"); } }}>
+                                Mark Done
+                              </Button>
+                            )}
+                          </>
+                        )}
+                        {item.type === "task" && item.status === "done" && (
+                          <>
+                            <Button size="sm" variant="outline" className="h-8 text-xs"
+                              onClick={async () => { try { const u = await updateItemAction(item.id, { status: "pending" } as any); upsertItem(u as Item); upsertBubble({ ...selectedBubble!, status: u.status }); toast.success("Reopened"); } catch { toast.error("Failed"); } }}>
+                              Reopen
+                            </Button>
+                            <Button size="sm" variant="destructive" className="h-8 text-xs"
+                              onClick={async () => { try { await updateItemAction(item.id, { status: "archived" } as any); useBubbleStore.getState().removeBubble(item.id); toast.success("Archived"); closeBubbleSheet(); } catch { toast.error("Failed"); } }}>
+                              Archive
+                            </Button>
+                          </>
+                        )}
+                        {item.type === "idea" && item.status !== "archived" && (
+                          <Button size="sm" variant="destructive" className="h-8 text-xs"
+                            onClick={async () => { try { const a = await archiveIdeaAction(item.id); upsertItem(a as Item); useBubbleStore.getState().removeBubble(item.id); toast.success("Archived"); closeBubbleSheet(); } catch { toast.error("Failed"); } }}>
+                            Archive Idea
+                          </Button>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <p className="py-6 text-center text-sm text-muted-foreground">Not found</p>
                   )}
-                  {item.due_date && (
-                    <p className="mt-1 text-xs text-[#195552]">
-                      <span className="font-medium">Due:</span> {new Date(item.due_date).toLocaleDateString()}
-                    </p>
-                  )}
-                </div>
-                {item.type === "task" && item.status !== "done" && item.status !== "archived" && (
-                  <div className="flex gap-2">
-                    {item.status !== "in_progress" && (
-                      <Button
-                        size="sm"
-                        onClick={async () => {
-                          try {
-                            const updated = await startTaskAction(item.id);
-                            upsertItem(updated as Item);
-                            upsertBubble({
-                              ...selectedBubble!,
-                              status: updated.status,
-                            });
-                            toast.success("Task started");
-                          } catch (error) {
-                            console.error(error);
-                            toast.error("Couldn't start task");
-                          }
-                        }}
-                        className="h-8 rounded-full bg-[#FFD833] px-4 text-xs font-semibold text-[#0B1918] hover:bg-[#FECB32]"
-                      >
-                        Start Task
-                      </Button>
-                    )}
-                    {item.status === "in_progress" && (
-                      <Button
-                        size="sm"
-                        onClick={async () => {
-                          try {
-                            const updated = await completeItemAction(item.id);
-                            upsertItem(updated as Item);
-                            upsertBubble({
-                              ...selectedBubble!,
-                              status: updated.status,
-                            });
-                            toast.success("Task completed!");
-                            // Refresh XP summary
-                            window.dispatchEvent(new CustomEvent("refresh-xp"));
-                          } catch (error) {
-                            console.error(error);
-                            toast.error("Couldn't complete task");
-                          }
-                        }}
-                        className="h-8 rounded-full bg-[#0EA8A8] px-4 text-xs font-semibold text-white hover:bg-[#0C8F90]"
-                      >
-                        Mark Done
-                      </Button>
-                    )}
-                  </div>
-                )}
-                {item.type === "task" && item.status === "done" && (
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        try {
-                          const updated = await updateItemAction(item.id, { status: "pending" } as any);
-                          upsertItem(updated as Item);
-                          upsertBubble({
-                            ...selectedBubble!,
-                            status: updated.status,
-                          });
-                          toast.success("Task reopened");
-                        } catch (error) {
-                          console.error(error);
-                          toast.error("Couldn't reopen task");
-                        }
-                      }}
-                      className="h-8 rounded-full border-[#0EA8A8]/40 px-4 text-xs font-semibold text-[#0EA8A8] hover:border-[#0EA8A8]/70"
-                    >
-                      Reopen Task
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        try {
-                          const updated = await updateItemAction(item.id, { status: "archived" } as any);
-                          upsertItem(updated as Item);
-                          useBubbleStore.getState().removeBubble(item.id);
-                          toast.success("Task archived");
-                          closeBubbleSheet();
-                        } catch (error) {
-                          console.error(error);
-                          toast.error("Couldn't archive task");
-                        }
-                      }}
-                      className="h-8 rounded-full border-[#FF7348]/40 px-4 text-xs font-semibold text-[#FF7348] hover:border-[#FF7348]/70"
-                    >
-                      Archive
-                    </Button>
-                  </div>
-                )}
-                {item.type === "idea" && item.status !== "archived" && (
-                  <div className="flex gap-2 mt-4">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={async () => {
-                        try {
-                          const archived = await archiveIdeaAction(item.id);
-                          upsertItem(archived as Item);
-                          useBubbleStore.getState().removeBubble(item.id);
-                          toast.success("Idea archived");
-                          closeBubbleSheet();
-                        } catch (error) {
-                          console.error(error);
-                          toast.error("Couldn't archive idea");
-                        }
-                      }}
-                      className="h-8 rounded-full border-[#FF7348]/40 px-4 text-xs font-semibold text-[#FF7348] hover:border-[#FF7348]/70"
-                    >
-                      Archive Idea
-                    </Button>
-                  </div>
-                )}
-                {item.notes && (
-                  <div>
-                    <h4 className="text-xs font-semibold text-[#0B1918]">Notes</h4>
-                    <p className="mt-1 text-xs text-[#195552]">{item.notes}</p>
-                  </div>
-                )}
-                  </>
-                ) : (
-                  <div className="py-8 text-center text-sm text-[#195552]">
-                    Task not found
-                  </div>
-                )}
-              </div>
+                </CardContent>
+              </Card>
             )}
 
+            {/* Create workstream form */}
             {selectedBubbleType === "life_area" && (
-              <div className="space-y-3 rounded-3xl border border-[#0EA8A8]/15 bg-white p-5 shadow-sm">
-                <h3 className="text-sm font-semibold text-[#0B1918]">Add {activeTab.slice(0, -1)}</h3>
-              <Input
-                placeholder={`Name your ${activeTab.slice(0, -1)}`}
-                value={workstreamTitle}
-                onChange={(event) => setWorkstreamTitle(event.target.value)}
-                className="rounded-full border-[#0EA8A8]/20"
-              />
-              <Textarea
-                placeholder="Short description"
-                value={workstreamDescription}
-                onChange={(event) => setWorkstreamDescription(event.target.value)}
-                className="min-h-[80px] rounded-2xl border-[#0EA8A8]/20"
-              />
-              <Button
-                disabled={creatingWorkstream}
-                onClick={handleCreateWorkstream}
-                className="w-full rounded-full bg-[#0EA8A8] text-white transition hover:bg-[#0C8F90]"
-              >
-                {creatingWorkstream ? "Creating…" : "Create"}
-              </Button>
-              </div>
+              <Card className="py-4 mt-3">
+                <CardContent className="space-y-3 px-4 py-0">
+                  <p className="text-sm font-medium">Add {activeTab.slice(0, -1)}</p>
+                  <Input placeholder={`Name your ${activeTab.slice(0, -1)}`} value={workstreamTitle} onChange={(e) => setWorkstreamTitle(e.target.value)} />
+                  <Textarea placeholder="Short description" value={workstreamDescription} onChange={(e) => setWorkstreamDescription(e.target.value)} className="min-h-[72px] resize-none" />
+                  <Button disabled={creatingWorkstream} onClick={handleCreateWorkstream} className="w-full">{creatingWorkstream ? "Creating…" : "Create"}</Button>
+                </CardContent>
+              </Card>
             )}
 
+            {/* Capture item form */}
             {(selectedBubbleType === "life_area" || selectedBubbleType === "project" || selectedBubbleType === "process") && (
-              <div className="space-y-3 rounded-3xl border border-[#0EA8A8]/15 bg-white p-5 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-[#0B1918]">Capture</h3>
-                <div className="rounded-full bg-[#D6FFF3]/80 p-1">
-                  <button
-                    onClick={() => setItemType("idea")}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                      itemType === "idea" ? "bg-white text-[#0B1918] shadow" : "text-[#195552]"
-                    }`}
-                  >
-                    Idea
-                  </button>
-                  <button
-                    onClick={() => setItemType("task")}
-                    className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                      itemType === "task" ? "bg-white text-[#0B1918] shadow" : "text-[#195552]"
-                    }`}
-                  >
-                    Task
-                  </button>
-                </div>
-              </div>
-              <Input
-                placeholder={`Add a ${itemType}`}
-                value={newItemTitle}
-                onChange={(event) => setNewItemTitle(event.target.value)}
-                className="rounded-full border-[#0EA8A8]/20"
-              />
-              <Textarea
-                placeholder="Optional notes"
-                value={newItemNotes}
-                onChange={(event) => setNewItemNotes(event.target.value)}
-                className="min-h-[80px] rounded-2xl border-[#0EA8A8]/20"
-              />
-              <Button
-                disabled={submittingItem}
-                onClick={handleCreateItem}
-                className="w-full rounded-full bg-[#FFD833] text-[#0B1918] transition hover:bg-[#FECB32]"
-              >
-                {submittingItem ? "Saving…" : "Save"}
-              </Button>
-              </div>
+              <Card className="py-4 mt-3">
+                <CardContent className="space-y-3 px-4 py-0">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">Capture</p>
+                    <div className="inline-flex rounded-lg bg-muted p-0.5">
+                      <button onClick={() => setItemType("idea")} className={`cursor-pointer rounded-md px-3 py-1 text-xs font-medium transition ${itemType === "idea" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Idea</button>
+                      <button onClick={() => setItemType("task")} className={`cursor-pointer rounded-md px-3 py-1 text-xs font-medium transition ${itemType === "task" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>Task</button>
+                    </div>
+                  </div>
+                  <Input placeholder={`Add a ${itemType}`} value={newItemTitle} onChange={(e) => setNewItemTitle(e.target.value)} />
+                  <Textarea placeholder="Optional notes" value={newItemNotes} onChange={(e) => setNewItemNotes(e.target.value)} className="min-h-[72px] resize-none" />
+                  <Button disabled={submittingItem} onClick={handleCreateItem} variant="secondary" className="w-full">{submittingItem ? "Saving…" : "Save"}</Button>
+                </CardContent>
+              </Card>
             )}
           </>
         ) : null}
@@ -750,52 +416,38 @@ export function AreaSheet() {
 }
 
 function WorkstreamList({ workstreams }: { workstreams: Workstream[] }) {
-  if (workstreams.length === 0) {
-    return <EmptyState message="Nothing here yet. Create the first one." />;
-  }
-
+  if (workstreams.length === 0) return <EmptyState message="Nothing here yet." />;
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {workstreams.map((stream) => (
-        <motion.div
-          key={stream.id}
-          className="rounded-2xl border border-[#0EA8A8]/15 bg-white p-4 shadow-sm"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-[#0B1918]">{stream.title}</h4>
-            <span className="text-xs uppercase text-[#195552]">{stream.kind}</span>
-          </div>
-          {stream.description && (
-            <p className="mt-2 text-xs text-[#195552]">{stream.description}</p>
-          )}
-        </motion.div>
+        <Card key={stream.id} className="py-3">
+          <CardContent className="px-4 py-0">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium truncate">{stream.title}</p>
+              <Badge variant="outline" className="text-[10px] capitalize shrink-0">{stream.kind}</Badge>
+            </div>
+            {stream.description && <p className="mt-1 text-xs text-muted-foreground">{stream.description}</p>}
+          </CardContent>
+        </Card>
       ))}
     </div>
   );
 }
 
 function ItemList({ items }: { items: Item[] }) {
-  if (items.length === 0) {
-    return <EmptyState message="No items yet for this area." />;
-  }
-
+  if (items.length === 0) return <EmptyState message="No items yet." />;
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {items.map((item) => (
-        <motion.div
-          key={item.id}
-          className="rounded-2xl border border-[#0EA8A8]/15 bg-white p-4 shadow-sm"
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-[#0B1918]">{item.title}</h4>
-            <span className="text-xs uppercase text-[#195552]">{item.type}</span>
-          </div>
-          {item.notes && <p className="mt-2 text-xs text-slate-500">{item.notes}</p>}
-        </motion.div>
+        <Card key={item.id} className="py-3">
+          <CardContent className="px-4 py-0">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-medium truncate">{item.title}</p>
+              <Badge variant={item.type === "task" ? "default" : "secondary"} className="text-[10px] capitalize shrink-0">{item.type}</Badge>
+            </div>
+            {item.notes && <p className="mt-1 text-xs text-muted-foreground truncate">{item.notes}</p>}
+          </CardContent>
+        </Card>
       ))}
     </div>
   );
@@ -803,7 +455,7 @@ function ItemList({ items }: { items: Item[] }) {
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="rounded-2xl border border-dashed border-[#0EA8A8]/20 bg-[#D6FFF3]/30 p-6 text-center text-xs text-[#195552]">
+    <div className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
       {message}
     </div>
   );
@@ -811,14 +463,8 @@ function EmptyState({ message }: { message: string }) {
 
 function mapTabToKind(tab: TabKey): "project" | "process" | "habit" {
   switch (tab) {
-    case "projects":
-      return "project";
-    case "processes":
-      return "process";
-    case "archive":
-      return "project"; // Not used, archive tab shows ideas
-    default:
-      return "project";
+    case "projects": return "project";
+    case "processes": return "process";
+    default: return "project";
   }
 }
-

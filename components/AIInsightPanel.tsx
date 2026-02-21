@@ -1,6 +1,9 @@
 "use client";
 
 import { memo } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 
 type Suggestion = {
   id: string;
@@ -20,37 +23,36 @@ export const AIInsightPanel = memo(function AIInsightPanel({
 }: AIInsightPanelProps) {
   if (suggestions.length === 0) {
     return (
-      <div className="flex w-72 flex-col gap-3 rounded-3xl border border-[#0EA8A8]/20 bg-white/80 p-4 text-sm text-[#195552] shadow">
-        <p className="font-semibold text-[#0B1918]">AI Coach</p>
-        <p>No suggestions yet. Try adding a project or idea.</p>
-      </div>
+      <Card className="w-72 py-4">
+        <CardContent className="space-y-1 px-4 py-0">
+          <p className="text-sm font-bold">AI Coach</p>
+          <p className="text-sm text-muted-foreground">No suggestions yet. Try adding a project or idea.</p>
+        </CardContent>
+      </Card>
     );
   }
 
   return (
-    <div className="flex w-72 flex-col gap-3 rounded-3xl border border-[#0EA8A8]/20 bg-white p-4 text-sm text-[#195552] shadow-[0_18px_36px_-28px_rgba(14,168,168,0.3)]">
-      <p className="font-semibold text-[#0B1918]">Try these next</p>
-      <ul className="space-y-2">
-        {suggestions.map((suggestion) => (
-          <li key={suggestion.id} className="rounded-2xl border border-[#0EA8A8]/15 bg-[#FDFBF6] p-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs uppercase tracking-wide text-[#0EA8A8]">
-                {suggestion.type === "task" ? "Task" : "Idea"}
-              </span>
-              <button
-                onClick={() => onApplySuggestion(suggestion.id)}
-                className="rounded-full bg-[#FFD833] px-3 py-1 text-xs font-semibold text-[#0B1918] transition hover:bg-[#FECB32]"
-              >
-                Add
-              </button>
+    <Card className="w-72 py-4">
+      <CardContent className="space-y-3 px-4 py-0">
+        <p className="text-sm font-bold">Try these next</p>
+        <div className="space-y-2">
+          {suggestions.map((suggestion) => (
+            <div key={suggestion.id} className="rounded-lg border bg-background p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Badge variant={suggestion.type === "task" ? "default" : "secondary"} className="capitalize text-[10px]">
+                  {suggestion.type}
+                </Badge>
+                <Button size="sm" variant="secondary" className="h-6 text-xs" onClick={() => onApplySuggestion(suggestion.id)}>
+                  Add
+                </Button>
+              </div>
+              <p className="text-sm font-medium">{suggestion.title}</p>
+              <p className="text-xs text-muted-foreground">{suggestion.description}</p>
             </div>
-            <p className="mt-2 text-sm font-semibold text-[#0B1918]">{suggestion.title}</p>
-            <p className="text-xs text-[#195552]">{suggestion.description}</p>
-          </li>
-        ))}
-      </ul>
-    </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 });
-
-

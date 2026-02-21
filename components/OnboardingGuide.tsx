@@ -33,19 +33,19 @@ export function OnboardingGuide({ visible }: OnboardingGuideProps) {
 
   return (
     <motion.div
-      className="pointer-events-auto fixed inset-x-4 bottom-8 z-40 mx-auto max-w-xl rounded-3xl border border-slate-200 bg-white/95 p-6 shadow-2xl backdrop-blur"
+      className="pointer-events-auto fixed inset-x-4 bottom-8 z-40 mx-auto max-w-xl rounded-xl border bg-card/95 p-6 shadow-lg backdrop-blur"
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
     >
-      <div className="flex flex-col gap-3 text-slate-900">
+      <div className="flex flex-col gap-3 text-foreground">
         <h2 className="text-lg font-semibold">{current.title}</h2>
-        <p className="text-sm text-slate-600">{current.description}</p>
+        <p className="text-sm text-muted-foreground">{current.description}</p>
         <div className="flex items-center justify-between">
           <div className="flex gap-2">
             {STEPS.map((_, idx) => (
               <span
                 key={idx}
-                className={`h-2 w-8 rounded-full ${idx === step ? "bg-slate-900" : "bg-slate-200"}`}
+                className={`h-2 w-8 rounded-full ${idx === step ? "bg-primary" : "bg-secondary"}`}
               />
             ))}
           </div>
@@ -53,7 +53,7 @@ export function OnboardingGuide({ visible }: OnboardingGuideProps) {
             {step > 0 && (
               <button
                 onClick={() => setStep((prev) => Math.max(prev - 1, 0))}
-                className="text-xs font-medium text-slate-500"
+                className="cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground"
               >
                 Back
               </button>
@@ -66,7 +66,7 @@ export function OnboardingGuide({ visible }: OnboardingGuideProps) {
                   setStep(STEPS.length);
                 }
               }}
-              className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-lg"
+              className="cursor-pointer rounded-full bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-md"
             >
               {step < STEPS.length - 1 ? "Next" : "Got it"}
             </button>
@@ -76,4 +76,3 @@ export function OnboardingGuide({ visible }: OnboardingGuideProps) {
     </motion.div>
   );
 }
-
