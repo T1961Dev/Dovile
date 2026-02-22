@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+export const dynamic = "force-dynamic";
+
 import { AuthLanding } from "@/components/AuthLanding";
 import { DashboardClient } from "@/components/dashboard/DashboardClient";
 import { getCalendarEventsForDate } from "@/lib/calendar";
@@ -28,19 +30,16 @@ export default async function AppPage({ searchParams }: AppPageProps) {
     return <AuthLanding />;
   }
 
-  // Note: Default data (settings, life areas, coach config) is automatically created
-  // by the database trigger `handle_new_user()` when the user signs up.
-  // No need to call seedDefaultsForUser() here.
-
-  const settings = await getSettings(supabase);
+  const settings = await getSettings(supabase, user.id);
   const timezone = settings?.timezone ?? "Europe/London";
   const awaitedParams = await Promise.resolve(searchParams);
   const date = awaitedParams?.date ?? getTodayISO(timezone);
 
-  const [data, xpSummary, events] = await Promise.all([
+  const [data, xpSummary, events, billingResult] = await Promise.all([
     getDashboardData(date),
     getXpSummary(),
     getCalendarEventsForDate(user.id, date, timezone),
+    (supabase.from("billing_profiles") as any).select("*").eq("user_id", user.id).maybeSingle(),
   ]);
 
   return (
@@ -52,7 +51,7 @@ export default async function AppPage({ searchParams }: AppPageProps) {
       settings={settings}
       xpSummary={xpSummary}
       events={events}
+      billingProfile={billingResult.data ?? null}
     />
   );
 }
-

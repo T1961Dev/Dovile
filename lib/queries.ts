@@ -35,42 +35,54 @@ export async function getWorkstreams(client?: TypedSupabaseClient) {
   return data;
 }
 
-export async function getSettings(client?: TypedSupabaseClient) {
+export async function getSettings(client?: TypedSupabaseClient, userId?: string) {
   const supabase = client ?? (await getServerSupabaseClient());
-  // RLS will automatically filter by auth.uid()
-  const { data, error } = await supabase
-    .from("settings")
-    .select("*")
-    .maybeSingle();
+  let query = supabase.from("settings").select("*");
+  if (userId) {
+    query = query.eq("user_id", userId);
+  }
+  const { data, error } = await query.maybeSingle();
 
   if (error) {
     throw error;
   }
 
-  return data as { user_id: string; daily_capacity: number; timezone: string; calendar_provider: string; default_resource_blocks?: any } | null;
+  return data as {
+    user_id: string;
+    daily_capacity: number;
+    timezone: string;
+    calendar_provider: string | null;
+    default_resource_blocks?: any;
+    accepted_terms_at: string | null;
+    accepted_privacy_at: string | null;
+    onboarding_completed_at: string | null;
+  } | null;
 }
 
 export async function getTodayTasks(dateIso: string, client?: TypedSupabaseClient) {
   const supabase = client ?? (await getServerSupabaseClient());
   const today = new Date().toISOString().slice(0, 10);
-  const isPastDate = dateIso < today;
   const isToday = dateIso === today;
   const isFutureDate = dateIso > today;
   
-  // For past dates: include done tasks
-  // For today: include pending and in_progress
-  // For future dates: include pending and in_progress
-  const statusFilter = isPastDate 
-    ? ["pending", "in_progress", "done"]
-    : ["pending", "in_progress"];
-  
+  const statusFilter = isFutureDate
+    ? ["pending", "in_progress"]
+    : ["pending", "in_progress", "done"];
+
+  // For today: include tasks scheduled for today AND unscheduled tasks
+  // (no scheduled_for and no due_date = active backlog that belongs to "today").
+  // For other dates: only tasks explicitly scheduled/due for that date.
+  const dateFilter = isToday
+    ? `scheduled_for.eq.${dateIso},and(scheduled_for.is.null,due_date.eq.${dateIso}),and(scheduled_for.is.null,due_date.is.null)`
+    : `scheduled_for.eq.${dateIso},and(scheduled_for.is.null,due_date.eq.${dateIso})`;
+
   const { data, error } = await supabase
     .from("items")
     .select("*")
     .eq("type", "task")
     .in("status", statusFilter)
     .neq("status", "archived")
-    .or(`scheduled_for.eq.${dateIso},and(scheduled_for.is.null,due_date.eq.${dateIso})`)
+    .or(dateFilter)
     .order("created_at", { ascending: true });
 
   if (error) {

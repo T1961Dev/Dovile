@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
-import { MAX_FREE_ITEMS } from "@/lib/constants";
+import { MAX_FREE_ITEMS, MAX_BASIC_ITEMS, STRIPE_PRICES } from "@/lib/constants";
 import { useDashboardStore } from "@/store/useDashboardStore";
 import {
   Dialog,
@@ -17,16 +17,19 @@ const PLANS = [
   {
     name: "Basic",
     price: "$6/mo",
-    description: "Unlock 500 items, Google Calendar sync, and streak tracking.",
+    priceId: STRIPE_PRICES.basic,
+    description: `Up to ${MAX_BASIC_ITEMS} items, Google Calendar sync, and streak tracking.`,
   },
   {
     name: "Pro",
     price: "$12/mo",
+    priceId: STRIPE_PRICES.pro,
     description: "Unlimited items, AI coach expansions, priority support.",
   },
   {
     name: "Pro+",
     price: "$24/mo",
+    priceId: STRIPE_PRICES.proplus,
     description: "Teams, shared areas, and advanced reporting snapshots.",
   },
 ];
@@ -38,10 +41,36 @@ type PaywallDialogProps = {
 export function PaywallDialog({ totalItemCount }: PaywallDialogProps) {
   const open = useDashboardStore((state) => state.paywallOpen);
   const setOpen = useDashboardStore((state) => state.setPaywallOpen);
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
   const usageRatio = useMemo(() => {
     return Math.min(totalItemCount / MAX_FREE_ITEMS, 1);
   }, [totalItemCount]);
+
+  const handleCheckout = async (priceId: string, planName: string) => {
+    if (!priceId) {
+      window.open("/settings", "_self");
+      return;
+    }
+    setLoadingPlan(planName);
+    try {
+      const response = await fetch("/api/stripe/create-checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priceId }),
+      });
+      const data = await response.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        console.error("No checkout URL returned", data);
+      }
+    } catch (err) {
+      console.error("Checkout failed", err);
+    } finally {
+      setLoadingPlan(null);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -52,6 +81,7 @@ export function PaywallDialog({ totalItemCount }: PaywallDialogProps) {
           </DialogTitle>
           <DialogDescription className="text-sm text-slate-500">
             You created {totalItemCount} items. Upgrade to keep adding circles and stay in flow.
+            Promo codes can be applied at checkout.
           </DialogDescription>
         </DialogHeader>
         <div className="rounded-2xl bg-slate-50 p-4">
@@ -74,24 +104,29 @@ export function PaywallDialog({ totalItemCount }: PaywallDialogProps) {
               </div>
               <Button
                 variant="default"
+                disabled={loadingPlan === plan.name}
                 className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white"
-                onClick={() => {
-                  void fetch("/api/stripe/create-portal", { method: "POST" })
-                    .then((response) => response.json())
-                    .then((data) => {
-                      if (data.url) {
-                        window.location.href = data.url;
-                      }
-                    });
-                }}
+                onClick={() => handleCheckout(plan.priceId, plan.name)}
               >
-                {plan.price}
+                {loadingPlan === plan.name ? "…" : plan.price}
               </Button>
             </div>
           ))}
         </div>
+        <p className="text-center text-xs text-slate-400 mt-2">
+          Already subscribed?{" "}
+          <button
+            className="underline hover:text-slate-600"
+            onClick={() => {
+              void fetch("/api/stripe/create-portal", { method: "POST" })
+                .then((r) => r.json())
+                .then((d) => { if (d.url) window.location.href = d.url; });
+            }}
+          >
+            Manage subscription
+          </button>
+        </p>
       </DialogContent>
     </Dialog>
   );
 }
-

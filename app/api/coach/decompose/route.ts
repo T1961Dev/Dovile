@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { decomposeProject } from "@/lib/ai";
+import { checkItemQuota, checkDailyCapacity } from "@/lib/stripe";
+import { getTodayISO } from "@/lib/dates";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const schema = z.object({
@@ -38,6 +40,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No tasks generated" }, { status: 400 });
   }
 
+  const quotaOk = await checkItemQuota(user.id);
+  if (!quotaOk) {
+    return NextResponse.json(
+      { error: "You've reached your plan's item limit. Upgrade to add more.", code: "quota_exceeded" },
+      { status: 402 },
+    );
+  }
+
+  const settings = await (supabase.from("settings").select("timezone") as any)
+    .eq("user_id", user.id).maybeSingle();
+  const timezone = settings.data?.timezone ?? "Europe/London";
+  const today = getTodayISO(timezone);
+
+  const capacityCheck = await checkDailyCapacity(user.id, today);
+  const taskCount = (breakdown.tasks as DecomposedTask[]).length;
+  if (capacityCheck.used + taskCount > capacityCheck.limit) {
+    return NextResponse.json(
+      {
+        error: `Adding ${taskCount} tasks would exceed your daily capacity (${capacityCheck.used}/${capacityCheck.limit}). Reduce the number of tasks or upgrade your plan.`,
+        code: "capacity_exceeded",
+        used: capacityCheck.used,
+        limit: capacityCheck.limit,
+      },
+      { status: 409 },
+    );
+  }
+
   const inserts = (breakdown.tasks as DecomposedTask[]).map((task) => ({
     user_id: user.id,
     life_area_id: payload.data.lifeAreaId,
@@ -46,6 +75,7 @@ export async function POST(request: Request) {
     notes: task.notes ?? null,
     type: "task",
     status: "pending",
+    scheduled_for: today,
   }));
 
   const { data, error } = await (supabase
@@ -64,4 +94,3 @@ type DecomposedTask = {
   title: string;
   notes?: string | null;
 };
-

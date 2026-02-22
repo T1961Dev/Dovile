@@ -349,16 +349,6 @@ export function TimelineView({ timezone }: TimelineViewProps) {
       {/* Timeline Content */}
       {showTimeline && (
         <div id="timeline-content" className="space-y-6">
-          {/* Habits Tracker */}
-          {habits.length > 0 && (
-            <HabitsTracker
-              habits={habits}
-              completions={habitCompletions}
-              today={selectedDate || format(new Date(), "yyyy-MM-dd")}
-              onToggleCompletion={handleToggleHabit}
-            />
-          )}
-
           {/* 24-Hour Clock with Resource Blocks */}
           {timelineMode === "day" && (
             <div className="flex flex-col items-center gap-4 rounded-3xl border border-[#0EA8A8]/20 bg-white/80 p-6 shadow-sm">

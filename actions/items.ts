@@ -1,8 +1,9 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-
 import { DEFAULT_XP_PER_TASK } from "@/lib/constants";
+import { getTodayISO } from "@/lib/dates";
+import { getSettings } from "@/lib/queries";
+import { checkItemQuota, checkDailyCapacity } from "@/lib/stripe";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 
@@ -20,6 +21,25 @@ export async function createItemAction(payload: ItemInsert): Promise<ItemRow> {
     throw new Error("Unauthorized");
   }
 
+  const quotaOk = await checkItemQuota(user.id);
+  if (!quotaOk) {
+    throw new Error("You've reached your plan's item limit. Upgrade to add more.");
+  }
+
+  const settings = await getSettings(supabase);
+  const timezone = settings?.timezone ?? "Europe/London";
+
+  if (payload.type === "task" && !payload.scheduled_for) {
+    payload.scheduled_for = getTodayISO(timezone);
+  }
+
+  if (payload.type === "task" && payload.scheduled_for) {
+    const capacityCheck = await checkDailyCapacity(user.id, payload.scheduled_for);
+    if (!capacityCheck.allowed) {
+      throw new Error(`Daily capacity reached (${capacityCheck.used}/${capacityCheck.limit}). Upgrade your plan or adjust your capacity in Settings.`);
+    }
+  }
+
   const { data, error } = await (supabase as any)
     .from("items")
     .insert({
@@ -33,7 +53,6 @@ export async function createItemAction(payload: ItemInsert): Promise<ItemRow> {
     throw new Error(error?.message ?? "Unable to create item");
   }
 
-  revalidatePath("/app");
   return data as ItemRow;
 }
 
@@ -93,7 +112,6 @@ export async function updateItemAction(id: string, payload: ItemUpdate): Promise
     }
   }
 
-  revalidatePath("/app");
   return data as ItemRow;
 }
 
@@ -127,9 +145,39 @@ export async function convertIdeaToTaskAction(
   id: string,
   overrides: ItemUpdate = {},
 ): Promise<ItemRow> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("Unauthorized");
+  }
+
+  const { data: item } = await (supabase
+    .from("items")
+    .select("type") as any)
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!item || item.type !== "idea") {
+    throw new Error("Item is not an idea");
+  }
+
+  const settings = await getSettings(supabase);
+  const timezone = settings?.timezone ?? "Europe/London";
+  const targetDate = overrides.scheduled_for ?? getTodayISO(timezone);
+
+  const { allowed, used, limit } = await checkDailyCapacity(user.id, targetDate);
+  if (!allowed) {
+    throw new Error(`Daily capacity reached (${used}/${limit}). Upgrade your plan or adjust your capacity in Settings.`);
+  }
+
   return updateItemAction(id, {
     type: "task",
     status: "pending",
+    scheduled_for: targetDate,
     ...overrides,
   });
 }
@@ -161,7 +209,6 @@ export async function archiveIdeaAction(id: string, reason?: string): Promise<It
     reason: reason ?? null,
   });
 
-  revalidatePath("/app");
   return data as ItemRow;
 }
 
@@ -189,7 +236,6 @@ export async function restoreIdeaAction(id: string): Promise<ItemRow> {
 
   await (supabase.from("idea_archive") as any).delete().eq("idea_id", id);
 
-  revalidatePath("/app");
   return data as ItemRow;
 }
 
@@ -208,8 +254,6 @@ export async function deleteItemAction(id: string): Promise<void> {
   if (error) {
     throw new Error(error.message);
   }
-
-  revalidatePath("/app");
 }
 
 export async function getItemAction(id: string): Promise<ItemRow | null> {

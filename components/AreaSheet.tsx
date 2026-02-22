@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { createWorkstreamAction, updateWorkstreamAction } from "@/actions/workstreams";
+import { createWorkstreamAction, updateWorkstreamAction, archiveWorkstreamAction, restoreWorkstreamAction } from "@/actions/workstreams";
 import { createItemAction, updateItemAction, startTaskAction, completeItemAction, getItemAction, archiveIdeaAction, restoreIdeaAction, getArchivedIdeasAction } from "@/actions/items";
 import { updateLifeAreaAction, deleteLifeAreaAction } from "@/actions/life-areas";
 import { useDashboardStore } from "@/store/useDashboardStore";
@@ -123,6 +123,18 @@ export function AreaSheet() {
     return [];
   }, [selectedBubbleType, selectedBubbleId, workstreams]);
 
+  const activeWorkstreams = useMemo(() => filteredWorkstreams.filter((s) => s.active !== false), [filteredWorkstreams]);
+  const archivedWorkstreams = useMemo(() => filteredWorkstreams.filter((s) => s.active === false), [filteredWorkstreams]);
+
+  const handleArchiveWorkstream = async (id: string) => {
+    try {
+      const archived = await archiveWorkstreamAction(id);
+      setWorkstreams(workstreams.map((s) => s.id === archived.id ? archived as Workstream : s));
+      useBubbleStore.getState().removeBubble(id);
+      toast.success("Archived");
+    } catch { toast.error("Failed to archive"); }
+  };
+
   const areaItems = useMemo(() => {
     if (selectedBubbleType === "life_area" && selectedBubbleId) {
       return [...tasks, ...ideas].filter((item) => item.life_area_id === selectedBubbleId);
@@ -187,7 +199,10 @@ export function AreaSheet() {
       toast.success(`${itemType === "task" ? "Task" : "Idea"} added`);
       setNewItemTitle("");
       setNewItemNotes("");
-    } catch (error) { console.error(error); toast.error(`Failed to create ${itemType}`); } finally { setSubmittingItem(false); }
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error?.message ?? `Failed to create ${itemType}`);
+    } finally { setSubmittingItem(false); }
   };
 
   const isOpen = Boolean(selectedBubbleId && selectedBubble);
@@ -264,18 +279,42 @@ export function AreaSheet() {
                   <TabsTrigger value="items" className="flex-1 text-xs">All</TabsTrigger>
                 </TabsList>
                 <TabsContent value="projects" className="mt-3 space-y-2">
-                  <WorkstreamList workstreams={filteredWorkstreams.filter((s) => s.kind === "project")} />
+                  <WorkstreamList workstreams={activeWorkstreams.filter((s) => s.kind === "project")} onArchive={handleArchiveWorkstream} />
                 </TabsContent>
                 <TabsContent value="processes" className="mt-3 space-y-2">
-                  <WorkstreamList workstreams={filteredWorkstreams.filter((s) => s.kind === "process")} />
+                  <WorkstreamList workstreams={activeWorkstreams.filter((s) => s.kind === "process")} onArchive={handleArchiveWorkstream} />
                 </TabsContent>
                 <TabsContent value="archive" className="mt-3 space-y-2">
+                  {archivedWorkstreams.length > 0 && (
+                    <div className="space-y-2 mb-4">
+                      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Archived Projects / Processes</p>
+                      {archivedWorkstreams.map((stream) => (
+                        <Card key={stream.id} className="py-3">
+                          <CardContent className="flex items-center justify-between gap-3 px-4 py-0">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium truncate">{stream.title}</p>
+                              <p className="text-[10px] text-muted-foreground capitalize">{stream.kind}</p>
+                            </div>
+                            <Button size="sm" variant="outline" className="h-7 text-xs shrink-0"
+                              onClick={async () => {
+                                try {
+                                  const restored = await restoreWorkstreamAction(stream.id);
+                                  setWorkstreams(workstreams.map((s) => s.id === restored.id ? restored as Workstream : s));
+                                  toast.success("Restored");
+                                } catch { toast.error("Couldn't restore"); }
+                              }}>Restore</Button>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
                   {loadingArchived ? (
                     <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
-                  ) : archivedIdeas.length === 0 ? (
-                    <EmptyState message="No archived ideas yet." />
-                  ) : (
+                  ) : archivedIdeas.length === 0 && archivedWorkstreams.length === 0 ? (
+                    <EmptyState message="No archived items yet." />
+                  ) : archivedIdeas.length > 0 ? (
                     <div className="space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Archived Ideas</p>
                       {archivedIdeas.map((idea) => (
                         <Card key={idea.id} className="py-3">
                           <CardContent className="flex items-center justify-between gap-3 px-4 py-0">
@@ -292,7 +331,7 @@ export function AreaSheet() {
                         </Card>
                       ))}
                     </div>
-                  )}
+                  ) : null}
                 </TabsContent>
                 <TabsContent value="items" className="mt-3 space-y-2">
                   <ItemList items={areaItems} />
@@ -359,7 +398,7 @@ export function AreaSheet() {
                               Reopen
                             </Button>
                             <Button size="sm" variant="destructive" className="h-8 text-xs"
-                              onClick={async () => { try { await updateItemAction(item.id, { status: "archived" } as any); useBubbleStore.getState().removeBubble(item.id); toast.success("Archived"); closeBubbleSheet(); } catch { toast.error("Failed"); } }}>
+                              onClick={async () => { try { await updateItemAction(item.id, { status: "archived" } as any); useDashboardStore.getState().removeItem(item.id); useBubbleStore.getState().removeBubble(item.id); toast.success("Archived"); closeBubbleSheet(); } catch { toast.error("Failed"); } }}>
                               Archive
                             </Button>
                           </>
@@ -380,10 +419,15 @@ export function AreaSheet() {
             )}
 
             {/* Create workstream form */}
-            {selectedBubbleType === "life_area" && (
+            {selectedBubbleType === "life_area" && (activeTab === "projects" || activeTab === "processes") && (
               <Card className="py-4 mt-3">
                 <CardContent className="space-y-3 px-4 py-0">
                   <p className="text-sm font-medium">Add {activeTab.slice(0, -1)}</p>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {activeTab === "projects"
+                      ? "Add as many projects as you have in this Life Area. A project is a temporary, goal-driven effort with a clear outcome, defined scope, and an end point. For example: Finding a new job, Trip to Thailand, Buying a House, etc."
+                      : "Add as many processes as you have in this Life Area. A process is a repeatable set of actions that consistently produces the same type of outcome over time. For example: Sports, Nutrition, Finances, etc."}
+                  </p>
                   <Input placeholder={`Name your ${activeTab.slice(0, -1)}`} value={workstreamTitle} onChange={(e) => setWorkstreamTitle(e.target.value)} />
                   <Textarea placeholder="Short description" value={workstreamDescription} onChange={(e) => setWorkstreamDescription(e.target.value)} className="min-h-[72px] resize-none" />
                   <Button disabled={creatingWorkstream} onClick={handleCreateWorkstream} className="w-full">{creatingWorkstream ? "Creating…" : "Create"}</Button>
@@ -415,7 +459,7 @@ export function AreaSheet() {
   );
 }
 
-function WorkstreamList({ workstreams }: { workstreams: Workstream[] }) {
+function WorkstreamList({ workstreams, onArchive }: { workstreams: Workstream[]; onArchive?: (id: string) => void }) {
   if (workstreams.length === 0) return <EmptyState message="Nothing here yet." />;
   return (
     <div className="space-y-2">
@@ -423,10 +467,19 @@ function WorkstreamList({ workstreams }: { workstreams: Workstream[] }) {
         <Card key={stream.id} className="py-3">
           <CardContent className="px-4 py-0">
             <div className="flex items-center justify-between gap-2">
-              <p className="text-sm font-medium truncate">{stream.title}</p>
-              <Badge variant="outline" className="text-[10px] capitalize shrink-0">{stream.kind}</Badge>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium truncate">{stream.title}</p>
+                {stream.description && <p className="mt-1 text-xs text-muted-foreground truncate">{stream.description}</p>}
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Badge variant="outline" className="text-[10px] capitalize">{stream.kind}</Badge>
+                {onArchive && (
+                  <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground hover:text-destructive" onClick={() => onArchive(stream.id)}>
+                    Archive
+                  </Button>
+                )}
+              </div>
             </div>
-            {stream.description && <p className="mt-1 text-xs text-muted-foreground">{stream.description}</p>}
           </CardContent>
         </Card>
       ))}

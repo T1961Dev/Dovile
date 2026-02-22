@@ -265,18 +265,27 @@ export interface Database {
           daily_capacity: number;
           timezone: string | null;
           user_id: string;
+          accepted_terms_at: string | null;
+          accepted_privacy_at: string | null;
+          onboarding_completed_at: string | null;
         };
         Insert: {
           calendar_provider?: string | null;
           daily_capacity?: number;
           timezone?: string | null;
           user_id: string;
+          accepted_terms_at?: string | null;
+          accepted_privacy_at?: string | null;
+          onboarding_completed_at?: string | null;
         };
         Update: {
           calendar_provider?: string | null;
           daily_capacity?: number;
           timezone?: string | null;
           user_id?: string;
+          accepted_terms_at?: string | null;
+          accepted_privacy_at?: string | null;
+          onboarding_completed_at?: string | null;
         };
         Relationships: [
           {
@@ -361,6 +370,14 @@ export interface Database {
           customer_id: string | null;
           price_id: string | null;
           subscription_status: string | null;
+          plan_name: string | null;
+          subscription_id: string | null;
+          current_period_start: string | null;
+          current_period_end: string | null;
+          cancel_at_period_end: boolean | null;
+          trial_end: string | null;
+          payment_method_type: string | null;
+          payment_method_last4: string | null;
           updated_at: string | null;
           user_id: string;
         };
@@ -369,6 +386,14 @@ export interface Database {
           customer_id?: string | null;
           price_id?: string | null;
           subscription_status?: string | null;
+          plan_name?: string | null;
+          subscription_id?: string | null;
+          current_period_start?: string | null;
+          current_period_end?: string | null;
+          cancel_at_period_end?: boolean | null;
+          trial_end?: string | null;
+          payment_method_type?: string | null;
+          payment_method_last4?: string | null;
           updated_at?: string | null;
           user_id: string;
         };
@@ -377,8 +402,88 @@ export interface Database {
           customer_id?: string | null;
           price_id?: string | null;
           subscription_status?: string | null;
+          plan_name?: string | null;
+          subscription_id?: string | null;
+          current_period_start?: string | null;
+          current_period_end?: string | null;
+          cancel_at_period_end?: boolean | null;
+          trial_end?: string | null;
+          payment_method_type?: string | null;
+          payment_method_last4?: string | null;
           updated_at?: string | null;
           user_id?: string;
+        };
+        Relationships: [
+          {
+            columns: ["user_id"];
+            foreignTableName: "users";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      payment_events: {
+        Row: {
+          id: string;
+          user_id: string;
+          event_type: string;
+          stripe_event_id: string | null;
+          amount_cents: number | null;
+          currency: string | null;
+          status: string;
+          metadata: Json | null;
+          created_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          event_type: string;
+          stripe_event_id?: string | null;
+          amount_cents?: number | null;
+          currency?: string | null;
+          status?: string;
+          metadata?: Json | null;
+          created_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          event_type?: string;
+          stripe_event_id?: string | null;
+          amount_cents?: number | null;
+          currency?: string | null;
+          status?: string;
+          metadata?: Json | null;
+          created_at?: string | null;
+        };
+        Relationships: [
+          {
+            columns: ["user_id"];
+            foreignTableName: "users";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      user_onboarding: {
+        Row: {
+          id: string;
+          user_id: string;
+          step_key: string;
+          completed_at: string | null;
+          metadata: Json | null;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          step_key: string;
+          completed_at?: string | null;
+          metadata?: Json | null;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          step_key?: string;
+          completed_at?: string | null;
+          metadata?: Json | null;
         };
         Relationships: [
           {

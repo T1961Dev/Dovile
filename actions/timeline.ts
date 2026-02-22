@@ -66,10 +66,10 @@ export async function getTimelineData(
 
   // For full scope (outer edge): 
   // Past: only Done tasks for that date
-  // Today/Future: ALL tasks except Done (all pending/in_progress tasks + all ideas)
+  // Today/Future: ALL non-done tasks + done tasks that were scheduled for this date
   const fullScopeTasks = isPast
     ? allTasks.filter((task: any) => task.status === "done" && task.scheduled_for === date)
-    : allTasks.filter((task: any) => task.status !== "done");
+    : allTasks.filter((task: any) => task.status !== "done" || task.scheduled_for === date);
 
   // Full scope ideas: 
   // Past: no ideas (only done tasks)

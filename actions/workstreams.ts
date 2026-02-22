@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -50,7 +49,6 @@ export async function createWorkstreamAction(input: unknown): Promise<Workstream
     throw new Error(error?.message ?? "Unable to create workstream");
   }
 
-  revalidatePath("/app");
   return data as unknown as WorkstreamRow;
 }
 
@@ -79,7 +77,6 @@ export async function updateWorkstreamAction(
     throw new Error(error?.message ?? "Unable to update workstream");
   }
 
-  revalidatePath("/app");
   return data as unknown as WorkstreamRow;
 }
 
@@ -102,8 +99,54 @@ export async function deleteWorkstreamAction(id: string): Promise<void> {
   if (error) {
     throw new Error(error.message);
   }
-
-  revalidatePath("/app");
 }
 
+export async function archiveWorkstreamAction(id: string): Promise<WorkstreamRow> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
+  if (!user) {
+    throw new Error("You must be signed in.");
+  }
+
+  const { data, error } = await (supabase as any)
+    .from("workstreams")
+    .update({ active: false })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Unable to archive workstream");
+  }
+
+  return data as unknown as WorkstreamRow;
+}
+
+export async function restoreWorkstreamAction(id: string): Promise<WorkstreamRow> {
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    throw new Error("You must be signed in.");
+  }
+
+  const { data, error } = await (supabase as any)
+    .from("workstreams")
+    .update({ active: true })
+    .eq("id", id)
+    .eq("user_id", user.id)
+    .select("*")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message ?? "Unable to restore workstream");
+  }
+
+  return data as unknown as WorkstreamRow;
+}

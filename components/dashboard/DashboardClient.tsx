@@ -1,23 +1,24 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef, useLayoutEffect } from "react";
+import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import type { User } from "@supabase/supabase-js";
 
-import { Pencil, LogOut, Menu, X } from "lucide-react";
+import { Pencil, LogOut, Menu, X, Settings } from "lucide-react";
 
-import { AvatarCoach } from "@/components/AvatarCoach";
-import { AreaSheet } from "@/components/AreaSheet";
+const AvatarCoach = dynamic(() => import("@/components/AvatarCoach").then((m) => m.AvatarCoach), { ssr: false, loading: () => null });
+const AreaSheet = dynamic(() => import("@/components/AreaSheet").then((m) => m.AreaSheet), { ssr: false, loading: () => null });
 import { CapacityHUD } from "@/components/CapacityHUD";
 import { GamificationHUD } from "@/components/GamificationHUD";
 import { OnboardingGuide } from "@/components/OnboardingGuide";
-import { PaywallDialog } from "@/components/PaywallDialog";
+const PaywallDialog = dynamic(() => import("@/components/PaywallDialog").then((m) => m.PaywallDialog), { ssr: false, loading: () => null });
 import { DayByDayTimeline } from "@/components/DayByDayTimeline";
-import { WheelOfLifeOverlay } from "@/components/WheelOfLifeOverlay";
+const WheelOfLifeOverlay = dynamic(() => import("@/components/WheelOfLifeOverlay").then((m) => m.WheelOfLifeOverlay), { ssr: false, loading: () => null });
+import { ConsentDialog } from "@/components/ConsentDialog";
 import { EmptyHeadPanel } from "@/components/dashboard/EmptyHeadPanel";
-import { PlannerOverlay } from "@/components/dashboard/PlannerOverlay";
-import { ScopeZoomControl } from "@/components/ScopeZoomControl";
+const PlannerOverlay = dynamic(() => import("@/components/dashboard/PlannerOverlay").then((m) => m.PlannerOverlay), { ssr: false, loading: () => null });
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardStore } from "@/store/useDashboardStore";
@@ -25,13 +26,20 @@ import { CircleCanvas } from "@/components/CircleCanvas";
 import { RING_CONFIG, CANVAS_SIZE, useBubbleStore } from "@/store/bubbles";
 import type { BubbleType, Bubble } from "@/store/bubbles";
 import type { BubbleDropResult } from "@/components/CircleCanvas";
-import { DEFAULT_DAILY_CAPACITY, MAX_FREE_ITEMS } from "@/lib/constants";
+import {
+  DEFAULT_DAILY_CAPACITY,
+  MAX_FREE_ITEMS,
+  MAX_FREE_DAILY_CAPACITY,
+  MAX_BASIC_DAILY_CAPACITY,
+  MAX_PRO_DAILY_CAPACITY,
+  STRIPE_PRICES,
+} from "@/lib/constants";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import type { DashboardData } from "@/lib/queries";
 import { useRouter } from "next/navigation";
 import type { CalendarEvent, Item, LifeArea, Workstream, XpSummary } from "@/types/entities";
 import type { Database } from "@/types/database";
-import { updateItemAction, createItemAction } from "@/actions/items";
+import { updateItemAction, createItemAction, convertIdeaToTaskAction } from "@/actions/items";
 import { updateWorkstreamAction } from "@/actions/workstreams";
 import { updateLifeAreaAction } from "@/actions/life-areas";
 import { fetchSuggestionsAction } from "@/actions/ai/suggestions";
@@ -209,6 +217,7 @@ const polarToNormalized = (radius: number, angle: number) => ({
 });
 
 type SettingsRow = Database["public"]["Tables"]["settings"]["Row"];
+type BillingRow = Database["public"]["Tables"]["billing_profiles"]["Row"];
 
 type DashboardClientProps = {
   user: User;
@@ -218,6 +227,7 @@ type DashboardClientProps = {
   settings: SettingsRow | null;
   xpSummary: XpSummary;
   events: CalendarEvent[];
+  billingProfile?: BillingRow | null;
   onDateChange?: (date: string) => Promise<DashboardData>;
 };
 
@@ -229,12 +239,14 @@ export function DashboardClient({
   settings,
   xpSummary: initialXpSummary,
   events,
+  billingProfile,
 }: DashboardClientProps) {
   const router = useRouter();
   const supabase = createBrowserSupabaseClient();
   const [xpSummary, setXpSummary] = useState(initialXpSummary);
   const [hydrated, setHydrated] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showConsent, setShowConsent] = useState(() => !settings?.accepted_terms_at);
 
   const refreshXpSummary = useCallback(async () => {
     try {
@@ -249,6 +261,13 @@ export function DashboardClient({
       console.error("Failed to refresh XP summary:", error);
     }
   }, []);
+
+  // Listen for refresh-xp when tasks are completed (e.g. from AreaSheet)
+  useEffect(() => {
+    const handler = () => refreshXpSummary();
+    window.addEventListener("refresh-xp", handler);
+    return () => window.removeEventListener("refresh-xp", handler);
+  }, [refreshXpSummary]);
   const hydrate = useDashboardStore((state) => state.hydrate);
   const setWheelOverlayOpen = useDashboardStore((state) => state.setWheelOverlayOpen);
   const setCoachOpen = useDashboardStore((state) => state.setCoachOpen);
@@ -279,10 +298,19 @@ export function DashboardClient({
     syncUserContext(user.id);
   }, [syncUserContext, user.id]);
 
-  const mountedRef = useRef(false);
+  const hydratedRef = useRef(false);
   const fetchIdRef = useRef(0);
+  const prevSelectedDate = useRef<string>("");
 
+  // Hydrate store from server data ONCE on mount only.
+  // After this, the store is the source of truth — updated via optimistic
+  // actions and the realtime subscription. Re-running this on every prop change
+  // (caused by revalidatePath in other actions) would overwrite local state.
   useEffect(() => {
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+    prevSelectedDate.current = date;
+
     hydrate({
       date,
       areas: data.areas,
@@ -298,19 +326,20 @@ export function DashboardClient({
       items: wheelItems,
     });
     setHydrated(true);
-  }, [hydrate, date, data, events, hydrateBubbles]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch fresh data whenever the user picks a different date on the timeline
   useEffect(() => {
     if (!hydrated || !selectedDate) return;
 
-    // Skip the very first run — data was already loaded from server props above
-    if (!mountedRef.current) {
-      mountedRef.current = true;
+    // Skip if this is the initial date (already loaded from server props above)
+    if (selectedDate === prevSelectedDate.current) {
+      prevSelectedDate.current = selectedDate;
       return;
     }
+    prevSelectedDate.current = selectedDate;
 
-    // Increment a fetch counter so stale responses from rapid scrubbing are dropped
     const id = ++fetchIdRef.current;
 
     const loadTimelineData = async () => {
@@ -318,7 +347,6 @@ export function DashboardClient({
         const { getTimelineData } = await import("@/actions/timeline");
         const payload = await getTimelineData(selectedDate, "day", "full", timezone);
 
-        // If the user already moved to another date while we were fetching, discard
         if (id !== fetchIdRef.current) return;
 
         hydrate({
@@ -437,13 +465,14 @@ export function DashboardClient({
         const nearestLifeArea = findNearestBubbleByType("life_area", angle);
         const newLifeArea =
           nearestLifeArea?.lifeAreaId ?? nearestLifeArea?.id ?? bubble.lifeAreaId;
-        const payload: Record<string, unknown> = { type: "task" };
-        if (newLifeArea) {
-          payload.life_area_id = newLifeArea;
-        }
-        payload.bubble_position = { ring: RING_CONFIG.task.radius, angle };
-        payload.bubble_size = RING_CONFIG.task.baseSize;
-        const updated = await updateItemAction(bubble.id, payload as any);
+        const targetDate = selectedDate || date;
+        const normalized = polarToNormalized(RING_CONFIG.task.radius, angle);
+        const updated = await convertIdeaToTaskAction(bubble.id, {
+          life_area_id: newLifeArea ?? undefined,
+          scheduled_for: targetDate,
+          bubble_position: { ring: RING_CONFIG.task.radius, angle, x: normalized.x, y: normalized.y },
+          bubble_size: RING_CONFIG.task.baseSize,
+        });
 
         removeItem(bubble.id);
         upsertItemToStore(mapRowToItem(updated));
@@ -564,7 +593,8 @@ export function DashboardClient({
       }
     } catch (error) {
       console.error(error);
-      toast.error("Something went wrong updating this bubble.");
+      const msg = error instanceof Error ? error.message : "Something went wrong updating this bubble.";
+      toast.error(msg);
     }
   };
 
@@ -634,6 +664,7 @@ export function DashboardClient({
         life_area_id: lifeAreaId,
         workstream_id: workstreamId ?? null,
         status: "pending",
+        scheduled_for: suggestion.type === "task" ? (selectedDate || date) : null,
       } as any);
 
       const bubbleStore = useBubbleStore.getState();
@@ -657,9 +688,9 @@ export function DashboardClient({
       useBubbleStore.getState().forgetLocalPosition(newBubble.id);
       removeSuggestion(suggestionId);
       toast.success("Suggestion added to your scope.");
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      toast.error("Couldn't apply this suggestion.");
+      toast.error(error?.message ?? "Couldn't apply this suggestion.");
     }
   };
 
@@ -844,7 +875,27 @@ export function DashboardClient({
     }
   }, [data.totalItemCount, setPaywallOpen]);
 
-  const dailyCapacity = settings?.daily_capacity ?? DEFAULT_DAILY_CAPACITY;
+  const baseDailyCapacity = settings?.daily_capacity ?? DEFAULT_DAILY_CAPACITY;
+  const billingStatus = billingProfile?.subscription_status ?? "free";
+  const priceId = billingProfile?.price_id ?? null;
+
+  const planCapLimit = billingStatus === "free" || !billingStatus
+    ? MAX_FREE_DAILY_CAPACITY
+    : priceId === STRIPE_PRICES.basic
+      ? MAX_BASIC_DAILY_CAPACITY
+      : MAX_PRO_DAILY_CAPACITY;
+
+  const dailyCapacity = Math.min(baseDailyCapacity, planCapLimit);
+
+  const planLabel = billingStatus === "free" || !billingStatus
+    ? "Free"
+    : priceId === STRIPE_PRICES.proplus
+      ? "Pro+"
+      : priceId === STRIPE_PRICES.pro
+        ? "Pro"
+        : priceId === STRIPE_PRICES.basic
+          ? "Basic"
+          : "Active";
 
   const onboardingComplete = areaCount >= 8;
 
@@ -955,7 +1006,6 @@ export function DashboardClient({
             {/* Center column: Gamification + Zoom + Wheel */}
             <div className="flex flex-col items-stretch gap-2 rounded-lg border bg-card p-2.5 shadow-xs relative z-50 md:col-span-1">
               <GamificationHUD summary={xpSummary} />
-              <ScopeZoomControl timezone={timezone} />
               <Button variant="outline" size="sm" onClick={() => setWheelOverlayOpen(true)} className="h-7 w-full text-xs">
                 View Wheel of Life
               </Button>
@@ -963,15 +1013,23 @@ export function DashboardClient({
 
             {/* Right column: Logout + Capacity */}
             <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 relative z-50 md:col-span-1 lg:col-span-1">
-              <Button variant="ghost" size="sm" onClick={handleLogout} className="h-7 text-xs order-2 sm:order-1" title="Log out">
-                <LogOut className="h-3.5 w-3.5 mr-1" />
-                <span className="hidden sm:inline">Logout</span>
-              </Button>
+              <div className="flex items-center gap-1 order-2 sm:order-1">
+                <Button variant="ghost" size="sm" onClick={() => router.push("/settings")} className="h-7 text-xs cursor-pointer" title="Settings">
+                  <Settings className="h-3.5 w-3.5 mr-1" />
+                  <span className="hidden sm:inline">Settings</span>
+                </Button>
+                <Button variant="ghost" size="sm" onClick={handleLogout} className="h-7 text-xs cursor-pointer" title="Log out">
+                  <LogOut className="h-3.5 w-3.5 mr-1" />
+                  <span className="hidden sm:inline">Logout</span>
+                </Button>
+              </div>
               <CapacityHUD
                 scheduledCount={tasks.length}
                 capacity={dailyCapacity}
+                maxPlanCapacity={planCapLimit}
                 timezone={timezone}
                 selectedDate={selectedDate || date}
+                planLabel={planLabel}
                 variant="compact"
               />
             </div>
@@ -1024,6 +1082,7 @@ export function DashboardClient({
       <AreaSheet />
       <EmptyHeadPanel />
       <PlannerOverlay />
+      <ConsentDialog open={showConsent} onAccept={() => setShowConsent(false)} />
     </div>
   );
 }

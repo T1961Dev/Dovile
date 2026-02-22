@@ -67,7 +67,10 @@ export function EmptyHeadPanel() {
           bubbleStore.upsertBubble({ ...addedBubble, metadata: { ...addedBubble.metadata, __locked: true } });
         }
         toast.success("Converted to task");
-      } catch (error) { console.error(error); toast.error("Couldn't convert"); }
+      } catch (error) {
+        console.error(error);
+        toast.error(error instanceof Error ? error.message : "Couldn't convert");
+      }
     });
   };
 

@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { decomposeProject } from "@/lib/ai";
@@ -87,8 +86,6 @@ export async function decomposeVisionAction(rawInput: unknown): Promise<Decompos
   if (stepError) {
     throw new Error(stepError.message);
   }
-
-  revalidatePath("/app");
 
   return {
     vision: vision as VisionRow,

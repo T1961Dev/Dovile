@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { DEFAULT_DAILY_CAPACITY } from "@/lib/constants";
 import { getTodayISO } from "@/lib/dates";
-import { checkItemQuota } from "@/lib/stripe";
+import { checkItemQuota, checkDailyCapacity } from "@/lib/stripe";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const createItemSchema = z.object({
@@ -35,10 +34,7 @@ export async function POST(request: Request) {
   const quotaOk = await checkItemQuota(user.id);
   if (!quotaOk) {
     return NextResponse.json(
-      {
-        error: "Free tier exceeded",
-        code: "quota_exceeded",
-      },
+      { error: "You've reached your plan's item limit. Upgrade to add more.", code: "quota_exceeded" },
       { status: 402 },
     );
   }
@@ -50,25 +46,17 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   const timezone = settings.data?.timezone ?? "Europe/London";
-  const capacity = settings.data?.daily_capacity ?? DEFAULT_DAILY_CAPACITY;
-
   const targetDate = payload.data.scheduledFor ?? getTodayISO(timezone);
 
   if (payload.data.type === "task") {
-    const { count } = await (supabase
-      .from("items")
-      .select("id", { count: "exact", head: true }) as any)
-      .eq("user_id", user.id)
-      .eq("type", "task")
-      .eq("status", "pending")
-      .or(`scheduled_for.eq.${targetDate},and(scheduled_for.is.null,due_date.eq.${targetDate})`);
-
-    if ((count ?? 0) >= capacity) {
+    const capacityCheck = await checkDailyCapacity(user.id, targetDate);
+    if (!capacityCheck.allowed) {
       return NextResponse.json(
         {
-          error: "Daily capacity exceeded",
+          error: `Daily capacity reached (${capacityCheck.used}/${capacityCheck.limit}). Upgrade your plan or adjust capacity in Settings.`,
           code: "capacity_exceeded",
-          suggestions: ["tomorrow", "this weekend", "next week"],
+          used: capacityCheck.used,
+          limit: capacityCheck.limit,
         },
         { status: 409 },
       );
@@ -95,4 +83,3 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ item: data });
 }
-

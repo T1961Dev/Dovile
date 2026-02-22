@@ -72,8 +72,8 @@ export async function POST(request: Request) {
       .select("id", { count: "exact", head: true }) as any)
       .eq("user_id", user.id)
       .eq("type", "task")
-      .eq("status", "pending")
-      .or(`scheduled_for.eq.${targetDate},and(scheduled_for.is.null,due_date.eq.${targetDate})`);
+      .in("status", ["pending", "in_progress"])
+      .or(`scheduled_for.eq.${targetDate},and(scheduled_for.is.null,due_date.eq.${targetDate}),and(scheduled_for.is.null,due_date.is.null)`);
 
     if ((count ?? 0) >= capacity) {
       return NextResponse.json(

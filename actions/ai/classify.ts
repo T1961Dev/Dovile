@@ -1,11 +1,11 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { DEFAULT_DAILY_CAPACITY } from "@/lib/constants";
 import { getTodayISO } from "@/lib/dates";
 import { classifyUtterance } from "@/lib/ai";
+import { checkItemQuota, checkDailyCapacity } from "@/lib/stripe";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 
@@ -46,6 +46,11 @@ export async function classifyCaptureAction(rawInput: unknown): Promise<Classify
 
   const userId = user.id;
 
+  const quotaOk = await checkItemQuota(userId);
+  if (!quotaOk) {
+    throw new Error("You've reached your plan's item limit. Upgrade in Settings to add more.");
+  }
+
   const { data: areasData, error: areasError } = await (supabase
     .from("life_areas")
     .select("*") as any)
@@ -73,14 +78,12 @@ export async function classifyCaptureAction(rawInput: unknown): Promise<Classify
     .eq("user_id", userId)
     .maybeSingle();
 
-  // Fetch workstreams with descriptions for AI context
   const { data: workstreamsData } = await (supabase
     .from("workstreams")
     .select("id, title, description, life_area_id") as any)
     .eq("user_id", userId)
     .eq("active", true);
 
-  // Get recent task examples for each workstream to help AI learn
   const workstreamsWithContext = await Promise.all(
     (workstreamsData ?? []).map(async (ws: { id: string; title: string; description: string | null; life_area_id: string }) => {
       const { data: recentTasks } = await (supabase
@@ -114,21 +117,19 @@ export async function classifyCaptureAction(rawInput: unknown): Promise<Classify
       (area: LifeAreaRow) => area.name.toLowerCase() === String(classification.life_area ?? "").toLowerCase(),
     ) ?? areas[0]!;
 
-  // Try to find matching workstream if workstream_hint is provided
   let workstreamId: string | null = null;
   const workstreamHint = classification.workstream_hint as string | null | undefined;
   if (workstreamHint) {
-    const { data: workstreamsData } = await (supabase
+    const { data: wsMatchData } = await (supabase
       .from("workstreams")
       .select("id, title") as any)
       .eq("user_id", userId)
       .eq("life_area_id", targetArea.id)
       .eq("active", true);
 
-    const workstreams = (workstreamsData ?? []) as Array<{ id: string; title: string }>;
+    const workstreams = (wsMatchData ?? []) as Array<{ id: string; title: string }>;
 
     if (workstreams && workstreams.length > 0) {
-      // Try to find a match (case-insensitive, partial match)
       const hintLower = workstreamHint.toLowerCase();
       const match = workstreams.find(
         (ws: { id: string; title: string }) => ws.title.toLowerCase().includes(hintLower) || hintLower.includes(ws.title.toLowerCase()),
@@ -140,16 +141,12 @@ export async function classifyCaptureAction(rawInput: unknown): Promise<Classify
   }
 
   const timezone = parsed.data.timezone ?? "Europe/London";
-  const targetDate = getTodayISO(timezone);
-  // In DUMP MODE, always create ideas (not tasks)
   const type = "idea";
 
-  // Use improved_wording if provided, otherwise use summary
   const title = (classification.improved_wording as string | undefined) 
     ?? (classification.summary as string | undefined) 
     ?? parsed.data.text.slice(0, 60);
 
-  // Store workstream_hint in notes if we couldn't match it to an existing workstream
   const notes = workstreamId ? null : (workstreamHint ?? null);
 
   const { data: createdItem, error } = await (supabase
@@ -161,7 +158,7 @@ export async function classifyCaptureAction(rawInput: unknown): Promise<Classify
       title,
       notes,
       type,
-      scheduled_for: null, // Ideas don't get scheduled
+      scheduled_for: null,
       status: "pending",
     })
     .select("*")
@@ -171,9 +168,6 @@ export async function classifyCaptureAction(rawInput: unknown): Promise<Classify
     throw new Error(error.message);
   }
 
-  revalidatePath("/app");
-
-  // Get workstream name if assigned
   let workstreamName: string | null = null;
   if (workstreamId) {
     const { data: workstream } = await (supabase
@@ -206,5 +200,3 @@ function buildCoachReply(areaName: string, actions: unknown, workstreamName?: st
   const extras = actions.map((action) => `• ${String(action)}`).join("\n");
   return `${intro}\n${extras}`;
 }
-
-

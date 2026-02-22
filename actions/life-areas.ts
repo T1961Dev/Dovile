@@ -1,7 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
-
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 
@@ -31,7 +29,6 @@ export async function createLifeAreaAction(payload: LifeAreaInsert): Promise<Lif
     throw new Error(error?.message ?? "Unable to create life area");
   }
 
-  revalidatePath("/app");
   return data as LifeAreaRow;
 }
 
@@ -55,7 +52,6 @@ export async function updateLifeAreaAction(id: string, payload: LifeAreaUpdate):
     throw new Error(error?.message ?? "Unable to update life area");
   }
 
-  revalidatePath("/app");
   return data as LifeAreaRow;
 }
 
@@ -74,8 +70,6 @@ export async function deleteLifeAreaAction(id: string): Promise<void> {
     .eq("user_id", user.id);
 
   if (error) throw new Error(error.message);
-
-  revalidatePath("/app");
 }
 
 export async function rateLifeAreaAction(lifeAreaId: string, rating: number, note?: string) {
@@ -104,10 +98,7 @@ export async function rateLifeAreaAction(lifeAreaId: string, rating: number, not
 
   if (updateError) {
     console.error("Failed to update life_areas.rating:", updateError.message);
-    // Don't throw - the rating history was saved successfully
   }
-
-  revalidatePath("/app");
 }
 
 export async function getLifeAreaRatingsAction(

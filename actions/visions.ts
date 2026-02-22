@@ -1,8 +1,9 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { getTodayISO } from "@/lib/dates";
+import { getSettings } from "@/lib/queries";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { Database } from "@/types/database";
 
@@ -52,7 +53,6 @@ export async function createVisionAction(raw: unknown): Promise<VisionRow> {
     throw new Error(error?.message ?? "Unable to create vision");
   }
 
-  revalidatePath("/app");
   return data as VisionRow;
 }
 
@@ -99,6 +99,10 @@ export async function approveVisionStepsAction(raw: unknown): Promise<ApproveRes
 
   const fallbackLifeAreaId = lifeAreas?.[0]?.id;
 
+  const settings = await getSettings(supabase);
+  const timezone = settings?.timezone ?? "Europe/London";
+  const todayDate = getTodayISO(timezone);
+
   const { data: steps, error: fetchError } = await (supabase
     .from("vision_steps")
     .select("*") as any)
@@ -140,6 +144,7 @@ export async function approveVisionStepsAction(raw: unknown): Promise<ApproveRes
         notes: (payload.notes as string | null) ?? null,
         type: assignment.bubbleType,
         status: "pending",
+        scheduled_for: assignment.bubbleType === "task" ? todayDate : null,
       };
       const { data: item, error: insertError } = await (supabase
         .from("items") as any)
@@ -203,8 +208,6 @@ export async function approveVisionStepsAction(raw: unknown): Promise<ApproveRes
     .eq("id", parsed.data.visionId)
     .eq("user_id", user.id);
 
-  revalidatePath("/app");
-
   return {
     createdItems,
     createdWorkstreams,
@@ -231,8 +234,6 @@ export async function archiveVisionAction(id: string): Promise<void> {
   if (error) {
     throw new Error(error.message);
   }
-
-  revalidatePath("/app");
 }
 
 
